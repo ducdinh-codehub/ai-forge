@@ -261,10 +261,31 @@ The left side has two sections.
 | Option | What you need |
 |---|---|
 | Synthetic toy data | Nothing. Good for learning how things work. |
-| CSV table | A `.csv` file. Choose which column to predict (**Target column**). |
+| CSV table | A `.csv` file (click **📂 Browse** to find it). Choose which column to predict (**Target column**). |
 | CSV with text | A `.csv` file with a text column and a label column |
 | Image folder | A folder with **one sub-folder per class** |
 | MNIST / Fashion-MNIST / CIFAR-10 | Nothing. Downloaded automatically the first time. |
+
+**Choosing files:** click **📂 Browse** next to the path box instead of typing a path.
+
+![File browser](docs/images/15-file-browser.svg)
+
+- **Left:** shortcuts to Home, Desktop, Downloads, Documents, the bundled **Examples**, your
+  **Workspace** and the whole computer.
+- **Middle:** folders and files. Only the file types that make sense are shown (e.g. `.csv`
+  when choosing a table). Switch on *all file types* or *hidden* to see everything.
+- **Right:** a **preview** of the highlighted item, so you can check it before choosing:
+  - **CSV**: number of rows, every column and whether it holds numbers or text, the first rows
+  - **Folder**: whether it is an image dataset, its classes, and how many images each class has.
+    It warns you when a class has fewer than 20 images.
+  - **Image**: size and a small colour thumbnail
+  - **Model files** (`.zip`, `.json`, `.safetensors`): the layers and classes inside
+- Keys: **↑ ↓** move · **Enter** opens a folder or chooses a file · **Backspace** goes to the
+  parent folder · **Esc** cancels. You can also type or paste a path into the box at the
+  bottom and press Enter.
+
+The same **📂 Browse** button appears everywhere you need a path: Import, Load weights,
+Use (an image or a batch file) and Export (the output folder).
 
 **Validation split** (default `0.2`) keeps 20% of the data aside to *test* the model on
 examples it never trained on. **Max samples** limits how much data is used (`0` = all), which
@@ -284,7 +305,29 @@ is handy for a quick test on a big dataset.
 | Device | Where to run: CPU or GPU | auto |
 | Continue from saved weights | On: keep training the existing model. Off: start over from scratch. | On |
 
-**Right side:** loss and accuracy charts, a progress bar, and a log of each epoch. Click
+**💻 This computer panel** (top right) shows your hardware and how hard it's working,
+refreshed every second:
+
+| Row | What it shows |
+|---|---|
+| Specs | CPU model and cores (e.g. *Apple M3 Pro · 11 cores (5P+6E)*), total RAM, GPU name |
+| Will train on / Training on | The processor training uses: **GPU** in green, **CPU** in yellow. If a GPU exists but Device is set to `cpu`, it tells you. |
+| CPU | Total usage, a history graph, and one small bar per core |
+| RAM | Memory used on the whole computer |
+| GPU | Usage % with history, GPU memory, and how much of it AIForge uses (plus temperature and power on NVIDIA cards) |
+| App | How much CPU and RAM AIForge itself uses, and the **training speed** in samples per second while training |
+
+How to read it:
+- **GPU high (60–100%) while training**: 👍 the GPU is doing the work.
+- **GPU low but CPU high**: you are training on the CPU (check *Device*), or the model is so
+  small that the GPU has little to do. That's normal for toy data.
+- **RAM near 100% (red)**: lower **Batch size** or **Max samples**, or close other apps.
+- **Samples/s**: compare settings with it. A bigger batch size is usually faster per sample.
+
+> On NVIDIA GPUs, install the optional extra to see GPU usage, temperature and power:
+> `.venv/bin/pip install -e ".[nvidia]"`
+
+**Right side (below the panel):** loss and accuracy charts, a progress bar, and a log of each epoch. Click
 **■ Stop** at any time. AIForge always keeps the **best** version, i.e. the epoch with the
 lowest validation loss.
 
@@ -553,10 +596,13 @@ You can change any template after creating it.
 | The screen looks cut off or squashed | Make the terminal window bigger (at least 120×35) or full screen. The banner hides itself on small windows. |
 | Strange symbols instead of boxes and lines | Use a modern terminal (iTerm2, Windows Terminal) and a font such as *Cascadia Code*, *JetBrains Mono* or *Fira Code* |
 | The mouse doesn't work | Use the keyboard (see the bottom bar), or enable mouse support in your terminal's settings |
+| I don't know the path to my file | Click **📂 Browse** and navigate to it. The preview shows whether it's the right file. |
+| My file doesn't appear in the browser | It's filtered by type. Switch on **all file types** (or **hidden** for files starting with `.`) |
 | Yellow warning "Model input is … but data is …" | Click **Auto-fit model to data** |
 | Red "✗ error" in the builder | Read the message on the right. Usually a layer is in the wrong place (e.g. `Conv2d` after `Flatten`). Remove or move it, or press `Ctrl+Z`. |
 | "Every layer is frozen" | In Fine-tune, untick at least one layer |
-| Training is very slow | Set **Max samples** to e.g. `5000`, use fewer epochs, or use a smaller template |
+| Training is very slow | Check the **💻 This computer** panel: if it says *Training on: CPU* but you have a GPU, set **Device** to `auto`. Also try a smaller model, or set **Max samples** to e.g. `5000` |
+| The panel shows GPU "none found" | PyTorch can't use your GPU. On NVIDIA, install the CUDA build of PyTorch from [pytorch.org](https://pytorch.org/get-started/locally/); Apple Silicon Macs work out of the box |
 | Download of MNIST/CIFAR fails | Check your internet connection. The files are stored in `workspace/data/` after the first download. |
 | Predictions look random | Make sure the model is trained (*Weights: trained* on the home screen) and check its validation accuracy in the run history |
 | "Expected N values, got M" | Type exactly as many comma-separated values as the hint shows, in the same order |
@@ -591,9 +637,11 @@ aiforge/
 ├── data.py          dataset loaders and input preprocessing
 ├── trainer.py       training / fine-tuning loop
 ├── predict.py       single and batch predictions
+├── sysinfo.py       hardware specs and live CPU / RAM / GPU usage
 ├── model_io.py      export and import
 ├── guide.py         plain-language explanations: layer encyclopedia, model walk-through, design review
-└── tui/             the terminal interface (Textual): home, builder, train, predict, export, guide
+└── tui/             the terminal interface (Textual): home, builder, train, predict, export, guide,
+                     browser (file/folder picker with previews), sysmon (the "This computer" panel)
 docs/
 ├── images/              README screenshots
 └── make_screenshots.py  regenerates them: .venv/bin/python docs/make_screenshots.py

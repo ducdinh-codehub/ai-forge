@@ -234,7 +234,9 @@ class HomeScreen(Screen):
                 self.refresh_models(name)
         self.app.push_screen(TextDialog(
             f"Load weights into '{name}'", "Weights file (.pt / .pth / .safetensors)",
-            hint="Tensors are matched by layer position and shape; anything that doesn't fit is skipped."),
+            hint="Tensors are matched by layer position and shape; anything that doesn't fit is skipped.",
+            browse={"title": "Choose a weights file", "mode": "file",
+                    "extensions": {".pt", ".pth", ".bin", ".safetensors"}}),
             done)
 
     def _name_check(self, v: str) -> str | None:

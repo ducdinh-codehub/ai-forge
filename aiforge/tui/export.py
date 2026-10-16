@@ -31,6 +31,7 @@ class ExportScreen(Screen):
             yield Label("Output folder")
             with Horizontal(classes="input-row"):
                 yield Input(str(self.app.ws.export_dir / self.model_name), id="out")
+                yield Button("📂 Browse", id="browse-out")
                 yield Button("⇩ Export", id="go", variant="primary")
             yield RichLog(id="export-log", markup=True, wrap=True)
         yield Footer()
@@ -44,6 +45,17 @@ class ExportScreen(Screen):
         if any("Layer" in p for p in problems):
             self.query_one("#export-warn", Static).update(f"[red]✗ {problems[0]} - fix it in the builder.[/]")
             self.query_one("#go", Button).disabled = True
+
+    @on(Button.Pressed, "#browse-out")
+    def _browse_out(self) -> None:
+        from .browser import FileBrowser
+
+        def done(path):
+            if path:
+                self.query_one("#out", Input).value = path
+        out = self.query_one("#out", Input).value.strip()
+        self.app.push_screen(FileBrowser("Choose the export folder", mode="dir", start=out or None,
+                                         hint="Pick the folder where exported files are written."), done)
 
     @on(Button.Pressed, "#go")
     def _go(self) -> None:
