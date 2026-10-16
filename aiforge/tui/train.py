@@ -8,8 +8,9 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
-from textual.widgets import (Button, Footer, Header, Input, Label, ProgressBar, RichLog, Select,
-                             SelectionList, Static, Switch)
+from textual.widgets import (Button, Footer, Header, Input, Label, Markdown, OptionList, ProgressBar,
+                             RichLog, Select, SelectionList, Static, Switch)
+from textual.widgets.option_list import Option
 
 from .. import data as datamod
 from ..spec import safe_name
@@ -20,7 +21,8 @@ from ..trainer import (TrainConfig, Trainer, available_devices, data_mismatch, f
 
 
 class TrainScreen(Screen):
-    BINDINGS = [Binding("escape", "back", "Back"), Binding("ctrl+r", "start", "Start", priority=True)]
+    BINDINGS = [Binding("escape", "back", "Back"), Binding("ctrl+r", "start", "Start", priority=True),
+                Binding("f1,ctrl+g", "toggle_guide", "Guide", priority=True)]
 
     def __init__(self, name: str, finetune: bool):
         super().__init__()
@@ -43,7 +45,7 @@ class TrainScreen(Screen):
 
     def compose(self) -> ComposeResult:
         yield Header()
-        with Horizontal():
+        with Horizontal(id="train-main"):
             with VerticalScroll(id="train-config"):
                 yield Static("① Data", classes="section-title")
                 yield Select([(v, k) for k, v in datamod.SOURCES.items()], value="synthetic",
@@ -129,17 +131,28 @@ class TrainScreen(Screen):
                 yield SystemPanel(id="sysmon")
                 yield Static("[dim]Load a dataset to begin.[/]", id="data-info")
                 with Horizontal(id="fit-row"):
-                    yield Static("", id="mismatch")
+                    # Button first: it stays visible when the guide drawer covers the right side.
                     yield Button("Auto-fit model to data", id="autofit", variant="warning")
+                    yield Static("", id="mismatch")
                 with Horizontal(classes="toolbar"):
                     yield Button("▶ Start", id="start", variant="success")
                     yield Button("■ Stop", id="stop", variant="error", disabled=True)
+                    yield Button("📖 Guide", id="guide-btn")
                     yield Static("", id="epoch-label")
                 yield ProgressBar(id="progress", show_eta=True)
                 with Horizontal(id="charts"):
                     yield LineChart("Loss", id="chart-loss", fmt="{:.3f}")
                     yield LineChart("Accuracy", id="chart-metric", fmt="{:.0%}")
                 yield RichLog(id="log", markup=True, wrap=True)
+            # Slide-over panel (its own layer, so it covers the charts instead of squeezing them).
+            with Vertical(id="guide-drawer"):
+                with Horizontal(id="drawer-head"):
+                    yield Static("📖 Guide", id="drawer-title")
+                    yield Button("Full guide ⤢", id="drawer-full")
+                    yield Button("✕", id="drawer-close")
+                yield OptionList(id="drawer-topics")
+                with VerticalScroll(id="drawer-body"):
+                    yield Markdown(id="drawer-text")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -149,6 +162,7 @@ class TrainScreen(Screen):
         self.query_one("#model-line", Static).update(
             f"{mode} [b]{self.model_name}[/b] · {self.spec.total_params():,} params · {weights}")
         self.query_one("#fit-row").display = False
+        self.query_one("#guide-drawer").display = False
         self._monitor = None
         self._sample_system()
         self.set_interval(1.0, self._sample_system)
@@ -299,6 +313,7 @@ class TrainScreen(Screen):
         n = int(self.query_one("#max_samples", Input).value or 0)
         self.train_ds, self.val_ds, self.info = datamod.limit(tr, n), va, info
         self.data_cfg = cfg
+        self._refresh_drawer("settings")
         classes = (f"{len(info.class_names)} classes: {', '.join(info.class_names[:8])}"
                    f"{'…' if len(info.class_names) > 8 else ''}") if info.class_names else "regression target"
         used = f" (using {len(self.train_ds):,})" if n else ""
@@ -337,6 +352,8 @@ class TrainScreen(Screen):
         if self.finetune:
             self._fill_freeze_list()
         self._check_mismatch()
+        if self.query_one("#guide-drawer").display:
+            self._fill_topics()
 
     @on(Button.Pressed, "#freeze-body")
     def _freeze_body(self) -> None:
@@ -449,6 +466,7 @@ class TrainScreen(Screen):
         elif "val_mae" in r:
             self.metric_hist.append(r["val_mae"])
             parts.append(f"val MAE [b]{r['val_mae']:.4g}[/b]")
+        self._refresh_drawer("charts")
         self.query_one("#chart-loss", LineChart).set_data(self.loss_hist, self.val_hist)
         self.query_one("#chart-metric", LineChart).set_data(self.train_metric_hist, self.metric_hist)
         parts.append(f"[dim]{r['seconds']}s[/]")
@@ -507,7 +525,99 @@ class TrainScreen(Screen):
             self.query_one("#stop", Button).disabled = True
             self.query_one("#log", RichLog).write("[yellow]Stopping after the current batch…[/]")
 
+    # -- guide drawer ------------------------------------------------------------
+
+    def action_toggle_guide(self) -> None:
+        drawer = self.query_one("#guide-drawer")
+        if drawer.display:
+            drawer.display = False
+            return
+        self._fill_topics()
+        drawer.display = True
+        self.query_one("#drawer-topics", OptionList).focus()
+
+    @on(Button.Pressed, "#guide-btn")
+    def _guide_btn(self) -> None:
+        self.action_toggle_guide()
+
+    @on(Button.Pressed, "#drawer-close")
+    def _drawer_close(self) -> None:
+        self.query_one("#guide-drawer").display = False
+
+    @on(Button.Pressed, "#drawer-full")
+    def _drawer_full(self) -> None:
+        from .guide import GuideScreen
+
+        topic = getattr(self, "_topic", "overview")
+        self.app.push_screen(GuideScreen(self.spec, topic if topic.startswith(("overview", "layer:"))
+                                         else "overview"))
+
+    def _fill_topics(self) -> None:
+        """(Re)build the topic list - the model may have changed (auto-fit)."""
+        topics = self.query_one("#drawer-topics", OptionList)
+        keep = getattr(self, "_topic", "charts" if self.loss_hist else "overview")
+        topics.clear_options()
+        opts = [Option("[b]Training[/b]", disabled=True),
+                Option(" 📈 Reading the charts (live)", id="charts"),
+                Option(" ⚙  Your training settings", id="settings"),
+                Option(f"[b]Model: {self.spec.name}[/b]", disabled=True),
+                Option(" 🧭 Overview & review", id="overview")]
+        opts += [Option(f" {i + 1:>2}. {l.type}", id=f"layer:{i}") for i, l in enumerate(self.spec.layers)]
+        topics.add_options(opts)
+        ids = [o.id for o in opts]
+        topics.highlighted = ids.index(keep) if keep in ids else ids.index("overview")
+        self._show_topic(ids[topics.highlighted])
+
+    @on(OptionList.OptionHighlighted, "#drawer-topics")
+    def _topic_highlighted(self, event: OptionList.OptionHighlighted) -> None:
+        if event.option.id:
+            self._show_topic(event.option.id)
+
+    def _show_topic(self, topic: str) -> None:
+        from ..guide import charts_markdown, layer_markdown, model_markdown, training_settings_markdown
+
+        self._topic = topic
+        if topic == "charts":
+            text = charts_markdown(self.loss_hist, self.val_hist, self.metric_hist, self.spec.task,
+                                   len(self.spec.class_names))
+        elif topic == "settings":
+            text = training_settings_markdown(self.spec, self._raw_settings(),
+                                              len(self.train_ds) if self.train_ds is not None else None,
+                                              self.finetune, self._frozen_params())
+        elif topic == "overview":
+            text = model_markdown(self.spec)
+        else:
+            text = layer_markdown(self.spec, int(topic.split(":")[1]))
+        self.query_one("#drawer-text", Markdown).update(text)
+
+    def _raw_settings(self) -> dict:
+        vals = {i: self.query_one(f"#{i}", Input).value for i in
+                ("epochs", "batch_size", "lr", "weight_decay", "early_stop", "val_split")}
+        vals.update({i: str(self.query_one(f"#{i}", Select).value) for i in ("optimizer", "scheduler", "device")})
+        return vals
+
+    def _frozen_params(self) -> int:
+        if not self.finetune:
+            return 0
+        frozen = set(self.query_one("#freeze", SelectionList).selected)
+        return sum(i.params for i in self.spec.analyze() if i.spec.id in frozen)
+
+    def _refresh_drawer(self, *topics: str) -> None:
+        """Re-render the open drawer if it currently shows one of ``topics``."""
+        if self.query_one("#guide-drawer").display and getattr(self, "_topic", None) in topics:
+            self._show_topic(self._topic)
+
+    @on(Input.Changed)
+    @on(Select.Changed)
+    @on(SelectionList.SelectedChanged)
+    def _settings_changed(self) -> None:
+        self._refresh_drawer("settings")
+
     def action_back(self) -> None:
+        drawer = self.query_one("#guide-drawer")
+        if drawer.display:
+            drawer.display = False
+            return
         if self.trainer:
             self.notify("Training is running - press Stop first.", severity="warning")
             return
