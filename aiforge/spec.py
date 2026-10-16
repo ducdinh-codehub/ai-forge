@@ -185,6 +185,23 @@ class Workspace:
         for d in (self.models_dir, self.data_dir, self.export_dir):
             d.mkdir(parents=True, exist_ok=True)
 
+    # -- UI preferences (e.g. panel sizes), kept in workspace/settings.json --
+
+    def get_setting(self, key: str, default=None):
+        try:
+            return json.loads((self.root / "settings.json").read_text()).get(key, default)
+        except (OSError, ValueError):
+            return default
+
+    def set_setting(self, key: str, value) -> None:
+        f = self.root / "settings.json"
+        try:
+            data = json.loads(f.read_text())
+        except (OSError, ValueError):
+            data = {}
+        data[key] = value
+        f.write_text(json.dumps(data, indent=2))
+
     def model_dir(self, name: str) -> Path:
         return self.models_dir / name
 
@@ -228,15 +245,23 @@ class Workspace:
         torch.save(model.state_dict(), self.model_dir(name) / "weights.pt")
 
     def load_model(self, name: str, spec: ModelSpec | None = None) -> tuple[ModelSpec, nn.Sequential, str]:
-        """Build the model and load whatever stored weights still fit its structure."""
-        spec = spec or self.load_spec(name)
+        """Build the model and load whatever stored weights still fit its structure.
+
+        Weights follow layer ids, so inserting/removing layers (e.g. a Flatten added by the
+        fix dialog) keeps the weights of every unchanged layer."""
+        stored = self.load_spec(name)
+        spec = spec or stored
         model = spec.build()
         note = "fresh random weights"
         wf = self.model_dir(name) / "weights.pt"
         if wf.exists():
             state = torch.load(wf, map_location="cpu", weights_only=True)
-            loaded, total = transfer_state(state, model)
-            note = f"loaded {loaded}/{total} weight tensors"
+            kept, total = remap_state(stored, state, spec, model)
+            if kept == 0:  # e.g. ids changed by an external tool - fall back to matching by name
+                n, t = transfer_state(state, model)
+                note = f"loaded {n}/{t} weight tensors"
+            else:
+                note = f"loaded trained weights for {kept}/{total} layers"
         return spec, model, note
 
     def load_history(self, name: str) -> list[dict]:

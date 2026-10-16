@@ -15,6 +15,7 @@ from textual.widgets.option_list import Option
 from .. import data as datamod
 from ..spec import safe_name
 from .chart import LineChart
+from .resize import DEFAULT_FRACTION, MAX_FRACTION, MIN_FRACTION, ResizeHandle
 from .sysmon import SystemPanel
 from ..trainer import (TrainConfig, Trainer, available_devices, data_mismatch, fit_spec_to_data,
                        pick_device, reset_head)
@@ -22,7 +23,9 @@ from ..trainer import (TrainConfig, Trainer, available_devices, data_mismatch, f
 
 class TrainScreen(Screen):
     BINDINGS = [Binding("escape", "back", "Back"), Binding("ctrl+r", "start", "Start", priority=True),
-                Binding("f1,ctrl+g", "toggle_guide", "Guide", priority=True)]
+                Binding("f1,ctrl+g", "toggle_guide", "Guide", priority=True),
+                Binding("less_than_sign", "resize_guide(0.05)", "Wider guide", show=False),
+                Binding("greater_than_sign", "resize_guide(-0.05)", "Narrower guide", show=False)]
 
     def __init__(self, name: str, finetune: bool):
         super().__init__()
@@ -133,6 +136,7 @@ class TrainScreen(Screen):
                 with Horizontal(id="fit-row"):
                     # Button first: it stays visible when the guide drawer covers the right side.
                     yield Button("Auto-fit model to data", id="autofit", variant="warning")
+                    yield Button("🔧 Fix model…", id="fixmodel", variant="warning")
                     yield Static("", id="mismatch")
                 with Horizontal(classes="toolbar"):
                     yield Button("▶ Start", id="start", variant="success")
@@ -146,8 +150,11 @@ class TrainScreen(Screen):
                 yield RichLog(id="log", markup=True, wrap=True)
             # Slide-over panel (its own layer, so it covers the charts instead of squeezing them).
             with Vertical(id="guide-drawer"):
+                yield ResizeHandle(id="drawer-handle")
                 with Horizontal(id="drawer-head"):
                     yield Static("📖 Guide", id="drawer-title")
+                    yield Button("◀", id="drawer-wider", tooltip="Wider  ( < )")
+                    yield Button("▶", id="drawer-narrower", tooltip="Narrower  ( > )")
                     yield Button("Full guide ⤢", id="drawer-full")
                     yield Button("✕", id="drawer-close")
                 yield OptionList(id="drawer-topics")
@@ -163,6 +170,7 @@ class TrainScreen(Screen):
             f"{mode} [b]{self.model_name}[/b] · {self.spec.total_params():,} params · {weights}")
         self.query_one("#fit-row").display = False
         self.query_one("#guide-drawer").display = False
+        self._set_guide_width(self.ws.get_setting("guide_width", DEFAULT_FRACTION), save=False)
         self._monitor = None
         self._sample_system()
         self.set_interval(1.0, self._sample_system)
@@ -331,6 +339,7 @@ class TrainScreen(Screen):
         row = self.query_one("#fit-row")
         row.display = bool(probs or problems)
         self.query_one("#autofit", Button).display = bool(probs)
+        self.query_one("#fixmodel", Button).display = bool(problems) and not probs
         self.query_one("#mismatch", Static).update(
             "[yellow]⚠ " + "\n⚠ ".join(probs or problems) + "[/]")
 
@@ -341,8 +350,9 @@ class TrainScreen(Screen):
             self.query_one("#log", RichLog).write(f"[cyan]auto-fit:[/] {c}")
         problems = self.spec.validate()
         if problems:
-            self.notify("Model still has problems: " + problems[0] + " - open the builder to fix.",
-                        severity="error", timeout=10)
+            self._refresh_after_change()
+            self._open_fix_dialog()
+            return
         else:
             self.notify(f"Model adjusted ({len(changes)} change{'s' if len(changes) != 1 else ''}), "
                         f"now {self.spec.total_params():,} params. Saved when training finishes.")
@@ -354,6 +364,73 @@ class TrainScreen(Screen):
         self._check_mismatch()
         if self.query_one("#guide-drawer").display:
             self._fill_topics()
+
+    # -- fixing a model that doesn't fit the data ----------------------------------
+
+    def _refresh_after_change(self) -> None:
+        self.query_one("#model-line", Static).update(
+            f"{'Fine-tune' if self.finetune else 'Train'} [b]{self.model_name}[/b] · "
+            f"{self.spec.total_params() if not self.spec.validate() else '?'} params")
+        if self.finetune:
+            self._fill_freeze_list()
+        self._check_mismatch()
+        if self.query_one("#guide-drawer").display:
+            self._fill_topics()
+
+    @on(Button.Pressed, "#fixmodel")
+    def _open_fix_dialog(self) -> None:
+        from ..fixes import explain, suggest
+        from .fixdialog import FixModelDialog
+
+        if self.info is None:
+            self.notify("Load a dataset first.", severity="warning")
+            return
+        self.app.push_screen(FixModelDialog(explain(self.spec, self.info), suggest(self.spec, self.info)),
+                             self._apply_fix)
+
+    def _apply_fix(self, fix) -> None:
+        if fix is None:
+            return
+        log = self.query_one("#log", RichLog)
+        if fix.kind == "builder":
+            self._open_builder()
+            return
+        old_ids = {l.id for l in self.spec.layers}
+        fix.spec.frozen = [f for f in self.spec.frozen if f in {l.id for l in fix.spec.layers}]
+        self.spec = fix.spec
+        if fix.kind == "template":
+            self._fresh_weights = True  # nothing from the old layers can be reused
+        added = [l.type for l in self.spec.layers if l.id not in old_ids]
+        log.write(f"[cyan]fix:[/] {fix.title} → {self.spec.total_params():,} params"
+                  + (f" (new: {', '.join(added)})" if added and fix.kind == 'auto' else ""))
+        self.notify(f"✓ {fix.title}. The model now fits your data ({self.spec.total_params():,} params) "
+                    "and is saved when training finishes.", timeout=8)
+        self._refresh_after_change()
+
+    def _open_builder(self) -> None:
+        from .builder import BuilderScreen
+
+        stored = self.ws.load_spec(self.model_name)
+        builder = BuilderScreen(self.spec.clone())
+        builder.saved_state = stored.to_dict()  # so the data-fitted changes count as unsaved
+        self._builder = builder
+        self.app.push_screen(builder)
+
+    def on_screen_resume(self) -> None:
+        builder = getattr(self, "_builder", None)
+        # The resume event from closing the fix dialog can arrive after the builder was pushed.
+        if builder is None or builder in self.app.screen_stack:
+            return
+        self._builder = None
+        if builder.original_name and builder.original_name != self.model_name:
+            self.model_name = builder.original_name  # renamed in the builder
+        self.spec = self.ws.load_spec(self.model_name)
+        problems = self.spec.validate() or (data_mismatch(self.spec, self.info) if self.info else [])
+        if problems:
+            self.notify(f"The saved model still doesn't fit: {problems[0]}", severity="warning", timeout=8)
+        else:
+            self.notify("✓ The model from the builder fits your data.")
+        self._refresh_after_change()
 
     @on(Button.Pressed, "#freeze-body")
     def _freeze_body(self) -> None:
@@ -412,7 +489,8 @@ class TrainScreen(Screen):
         else:
             self.spec.frozen = []
 
-        use_saved = self.finetune or self.query_one("#resume", Switch).value
+        use_saved = (self.finetune or self.query_one("#resume", Switch).value) and \
+            not getattr(self, "_fresh_weights", False)
         if use_saved:
             _, model, note = self.ws.load_model(self.model_name, self.spec)
         else:
@@ -499,6 +577,7 @@ class TrainScreen(Screen):
         if cfg.get("path"):
             cfg["path"] = str(Path(cfg["path"]).expanduser())
         self.spec.data["dataset_cfg"] = cfg
+        self._fresh_weights = False
         run["kind"] = "fine-tune" if self.finetune else "train"
         run["dataset"] = self.info.description
         if save_as != self.model_name:
@@ -535,6 +614,41 @@ class TrainScreen(Screen):
         self._fill_topics()
         drawer.display = True
         self.query_one("#drawer-topics", OptionList).focus()
+
+    def _set_guide_width(self, fraction: float, save: bool = True) -> None:
+        """Width as a fraction of the screen, so it adapts when the terminal is resized."""
+        try:
+            fraction = float(fraction)
+        except (TypeError, ValueError):
+            fraction = DEFAULT_FRACTION
+        fraction = round(min(MAX_FRACTION, max(MIN_FRACTION, fraction)), 3)
+        self._guide_width = fraction
+        self.query_one("#guide-drawer").styles.width = f"{fraction * 100:.1f}%"
+        self.query_one("#drawer-title", Static).update(f"📖 Guide  [dim]{fraction:.0%} of the screen[/]")
+        self.query_one("#drawer-wider", Button).disabled = fraction >= MAX_FRACTION
+        self.query_one("#drawer-narrower", Button).disabled = fraction <= MIN_FRACTION
+        if save:
+            self.ws.set_setting("guide_width", fraction)
+
+    def action_resize_guide(self, delta: float) -> None:
+        if self.query_one("#guide-drawer").display:
+            self._set_guide_width(self._guide_width + delta)
+
+    @on(Button.Pressed, "#drawer-wider")
+    def _wider(self) -> None:
+        self.action_resize_guide(0.05)
+
+    @on(Button.Pressed, "#drawer-narrower")
+    def _narrower(self) -> None:
+        self.action_resize_guide(-0.05)
+
+    @on(ResizeHandle.Resized)
+    def _dragged(self, event: ResizeHandle.Resized) -> None:
+        self._set_guide_width(event.fraction, save=event.done)
+
+    @on(ResizeHandle.Reset)
+    def _reset_width(self) -> None:
+        self._set_guide_width(DEFAULT_FRACTION)
 
     @on(Button.Pressed, "#guide-btn")
     def _guide_btn(self) -> None:

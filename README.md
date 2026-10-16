@@ -172,6 +172,17 @@ Make sure your model is selected in the list, then press **`t`** (or click **▶
    ![Data loaded - auto-fit needed](docs/images/05-train-mismatch.svg)
 
    Click **Auto-fit model to data**. AIForge adjusts the input and output layers for you.
+
+   > **If the model's structure doesn't suit the data** (for example a table model given
+   > images), a **🔧 Fix the model** window opens. It explains the problem in plain words and
+   > offers fixes, each already checked to work and showing its parameter count:
+   > - **🔧 automatic**: add the missing layer for you (*Flatten*, *GlobalAvgPool* or *SequencePool*) in the right place
+   > - **📦 template**: switch to a template made for your kind of data (e.g. a CNN for images)
+   > - **✎ manual**: open the builder with your data's shape already set and fix it yourself.
+   >   When you save and come back, training continues with your fixed model.
+   >
+   > The right side previews the model after the fix, with new layers marked **➕**. You can
+   > reopen the window any time with the **🔧 Fix model…** button.
 4. **② Training settings**: set **Epochs** to `40` and **Learning rate** to `0.005`.
 5. Click **▶ Start** (or press `Ctrl+R`).
 
@@ -342,6 +353,14 @@ panel on the right. You can keep changing settings and training while it's open.
 | 1. Linear, 2. ReLU, … | Each layer of the model with its real shapes and parameter counts |
 
 **Full guide ⤢** opens the full-screen guide. **✕**, **Esc** or **F1** closes the panel.
+
+**Make the panel wider or narrower** (from 25% to 85% of the screen):
+- **drag** its left edge (the coloured strip with `⋮`) with the mouse. **Double-click** the edge to reset it to the default (46%).
+- click **◀** (wider) or **▶** (narrower) in the panel's header
+- press **`<`** (wider) or **`>`** (narrower) when you're not typing in a box
+
+AIForge remembers the size you choose (in `workspace/settings.json`) and uses it the next time
+you open the panel.
 
 Click **■ Stop** at any time. AIForge always keeps the **best** version, i.e. the epoch with the
 lowest validation loss.
@@ -587,6 +606,7 @@ You can change any template after creating it.
 |---|---|---|---|---|---|
 | `n` | New model | `a` | Go to the layer list | `Ctrl+R` | Start training |
 | | | | | `F1` | Open / close the Guide panel |
+| | | | | `<` / `>` | Guide panel wider / narrower |
 | `i` | Import | `Enter` | Add the highlighted layer | `Esc` | Back (stop training first) |
 | `e` / `Enter` | Edit structure | `Del` | Remove layer | | |
 | `t` | Train | `Shift+↑ / ↓` | Move layer | | |
@@ -615,6 +635,7 @@ You can change any template after creating it.
 | I don't know the path to my file | Click **📂 Browse** and navigate to it. The preview shows whether it's the right file. |
 | My file doesn't appear in the browser | It's filtered by type. Switch on **all file types** (or **hidden** for files starting with `.`) |
 | Yellow warning "Model input is … but data is …" | Click **Auto-fit model to data** |
+| "Final output must be a flat vector, got shape (3, 64, 2)" (or similar) | The model is missing a layer that flattens images or sequences. Choose a fix in the **🔧 Fix the model** window (it opens after Auto-fit, or click **🔧 Fix model…**) |
 | Red "✗ error" in the builder | Read the message on the right. Usually a layer is in the wrong place (e.g. `Conv2d` after `Flatten`). Remove or move it, or press `Ctrl+Z`. |
 | "Every layer is frozen" | In Fine-tune, untick at least one layer |
 | Training is very slow | Check the **💻 This computer** panel: if it says *Training on: CPU* but you have a GPU, set **Device** to `auto`. Also try a smaller model, or set **Max samples** to e.g. `5000` |
@@ -636,6 +657,7 @@ workspace/
 │       ├── spec.json       ← the model's structure (layers, classes, preprocessing)
 │       ├── weights.pt      ← what the model learned
 │       └── history.json    ← every training run
+├── settings.json           ← your preferences (e.g. the Guide panel size)
 ├── exports/                ← files created by Export
 └── data/                   ← downloaded datasets (MNIST, CIFAR-10…)
 ```
@@ -656,6 +678,7 @@ aiforge/
 ├── sysinfo.py       hardware specs and live CPU / RAM / GPU usage
 ├── model_io.py      export and import
 ├── guide.py         plain-language explanations: layer encyclopedia, model walk-through, design review
+├── fixes.py         finds and verifies fixes when a model's structure doesn't fit the data
 └── tui/             the terminal interface (Textual): home, builder, train, predict, export, guide,
                      browser (file/folder picker with previews), sysmon (the "This computer" panel)
 docs/

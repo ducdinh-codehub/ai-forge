@@ -70,10 +70,11 @@ Screen { background: $background; }
 /* Training guide drawer ---------------------------------------------------- */
 #train-main { layers: base drawer; }
 #guide-drawer {
-    layer: drawer; dock: right; width: 46%; min-width: 60; height: 100%;
-    background: $surface; border-left: thick $accent; padding: 0 1; display: none;
+    layer: drawer; dock: right; width: 46%; min-width: 40; height: 100%;
+    background: $surface; padding: 0 1 0 0; display: none;
 }
-#drawer-head { height: auto; margin-top: 1; }
+#drawer-head { height: auto; margin-top: 1; padding-left: 1; }
+#drawer-topics, #drawer-body { margin-left: 1; }
 #drawer-title { width: 1fr; text-style: bold; color: $accent; padding-top: 1; }
 #drawer-head Button { margin-left: 1; min-width: 5; }
 #drawer-topics { height: auto; max-height: 12; margin-top: 1; }
