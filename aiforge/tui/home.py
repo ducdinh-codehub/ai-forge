@@ -13,16 +13,20 @@ from ..spec import safe_name
 from .banner import Banner
 from .modals import ConfirmDialog, ImportDialog, NewModelDialog, TextDialog
 
-WELCOME = """[b]Welcome to AIForge[/b] - build, train and ship neural networks without writing code.
+WELCOME = """[b]Welcome to AIForge![/b]
+Build, train and share neural networks - no code needed.
 
-[b]1. Create[/b]   [reverse] n [/reverse] new model from a template, then add/remove layers and watch
-           shapes and parameter counts update live.
-[b]2. Train[/b]    [reverse] t [/reverse] pick a dataset (CSV, image folder, MNIST, CIFAR-10, toy data) and train.
-[b]3. Fine-tune[/b] [reverse] f [/reverse] reuse a trained model on new data, freezing the layers you choose.
-[b]4. Use[/b]      [reverse] p [/reverse] try predictions on your own inputs or a whole file.
-[b]5. Export[/b]   [reverse] x [/reverse] weights (.pt / .safetensors), structure (.json / .py), TorchScript, ONNX.
+[b $accent]How it works[/]
+ [reverse] n [/reverse] [b]Create[/b]     pick a template, then add or remove layers
+ [reverse] t [/reverse] [b]Train[/b]      teach the model with your data
+ [reverse] f [/reverse] [b]Fine-tune[/b]  adapt a trained model to new data
+ [reverse] p [/reverse] [b]Use[/b]        get predictions from the model
+ [reverse] x [/reverse] [b]Export[/b]     save it as .pt, .safetensors, ONNX, …
 
-Already have a model? Press [reverse] i [/reverse] to import it."""
+Already have a model? Press [reverse] i [/reverse] to import it.
+
+[dim]New here? Press [b]n[/b], keep the default template, then press
+[b]t[/b] and train on the built-in "spirals" toy data.[/dim]"""
 
 
 class HomeScreen(Screen):
@@ -48,6 +52,8 @@ class HomeScreen(Screen):
             with Vertical(id="library"):
                 yield Static("Model library", classes="section-title")
                 yield DataTable(id="models", cursor_type="row", zebra_stripes=True)
+                yield Static("No models yet.\n\nPress [reverse] n [/reverse] to create your first model "
+                             "or [reverse] i [/reverse] to import one.", id="empty-hint")
                 with Horizontal(classes="toolbar"):
                     yield Button("✚ New", id="new", variant="primary")
                     yield Button("⇪ Import", id="import")
@@ -97,6 +103,8 @@ class HomeScreen(Screen):
             t.add_row(r["name"], r["task"], str(r["layers"]), f"{r['params']:,}",
                       "[green]trained[/]" if r["trained"] else "[dim]none[/]",
                       str(r["epochs"] or "-"), r["modified"], key=r["name"])
+        self.query_one("#empty-hint").display = not rows
+        t.display = bool(rows)
         names = [r["name"] for r in rows]
         if keep in names:
             t.move_cursor(row=names.index(keep))

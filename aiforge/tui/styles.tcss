@@ -16,10 +16,11 @@ Screen { background: $background; }
 #models { height: 1fr; }
 #details-pane { width: 72; padding: 0 1; border-left: tall $panel; }
 #details { height: 1fr; margin-top: 1; }
-#details-text { width: auto; }
+#details-text { width: 100%; }
+#empty-hint { height: 1fr; content-align: center middle; text-align: center; color: $text-muted; background: $boost; }
 
 /* Builder ---------------------------------------------------------------- */
-#palette-pane { width: 24; padding: 0 1; border-right: tall $panel; }
+#palette-pane { width: 27; padding: 0 1; border-right: tall $panel; }
 #palette { height: 1fr; }
 #palette-help { height: 6; color: $text-muted; padding-top: 1; }
 #stack-pane { width: 1fr; padding: 0 1; }

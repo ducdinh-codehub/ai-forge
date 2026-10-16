@@ -16,7 +16,7 @@ from ..layers import REGISTRY, by_category, coerce
 from ..spec import LayerSpec, ModelSpec, remap_state, safe_name
 from .modals import SaveChangesDialog
 
-BAR = 10
+BAR = 8
 
 
 def _shape(s) -> str:
@@ -75,7 +75,7 @@ class BuilderScreen(Screen):
                     if not items:
                         continue
                     options.append(Option(f"[b]{cat}[/b]", disabled=True))
-                    options += [Option(f"  {lt.name}", id=lt.name) for lt in items]
+                    options += [Option(f" {lt.name}", id=lt.name) for lt in items]
                 yield OptionList(*options, id="palette")
                 yield Static("", id="palette-help")
             with Vertical(id="stack-pane"):
@@ -101,7 +101,7 @@ class BuilderScreen(Screen):
         t.add_column("Settings", key="cfg", width=20)
         t.add_column("Output shape", key="out", width=13)
         t.add_column("Params", key="params", width=11)
-        t.add_column("Share", key="share", width=BAR + 5)
+        t.add_column("Share", key="share", width=BAR + 6)
         t.add_column("How it's counted", key="formula")
         self.refresh_stack()
         self.query_one("#palette", OptionList).highlighted = 1
@@ -125,7 +125,7 @@ class BuilderScreen(Screen):
             bar = "█" * round(share * BAR)
             rows.append((str(i.index + 1), f"{i.spec.type}{frozen}", _cfg_summary(i.spec), out,
                          f"{i.params:,}" if i.params else "[dim]0[/]",
-                         f"[cyan]{bar:<{BAR}}[/] {share:>4.0%}" if i.params else "", note))
+                         f"{share:>4.0%} [cyan]{bar}[/]" if i.params else "", note))
         keep = t.cursor_row if cursor is None else cursor
         if t.row_count == len(rows):  # update in place so focus/scroll stay put
             for r, row in enumerate(rows):
