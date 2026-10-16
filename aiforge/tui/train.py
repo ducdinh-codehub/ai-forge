@@ -14,8 +14,9 @@ from textual.widgets import (Button, Footer, Header, Input, Label, ProgressBar, 
 from .. import data as datamod
 from ..spec import safe_name
 from .chart import LineChart
+from .sysmon import SystemPanel
 from ..trainer import (TrainConfig, Trainer, available_devices, data_mismatch, fit_spec_to_data,
-                       reset_head)
+                       pick_device, reset_head)
 
 
 class TrainScreen(Screen):
@@ -49,7 +50,9 @@ class TrainScreen(Screen):
                              allow_blank=False, id="source")
                 with Vertical(id="grp-path", classes="group"):
                     yield Label("Path", id="path-label")
-                    yield Input(placeholder="~/data/table.csv", id="path")
+                    with Horizontal(classes="path-row"):
+                        yield Input(placeholder="~/data/table.csv", id="path")
+                        yield Button("📂 Browse", id="browse-data")
                 with Vertical(id="grp-csv", classes="group"):
                     yield Label("Target column  [dim](what to predict)[/]")
                     yield Select([], prompt="last column", id="target")
@@ -123,6 +126,7 @@ class TrainScreen(Screen):
                     yield Input(id="save_as")
             with Vertical(id="train-status"):
                 yield Static("", id="model-line", classes="section-title")
+                yield SystemPanel(id="sysmon")
                 yield Static("[dim]Load a dataset to begin.[/]", id="data-info")
                 with Horizontal(id="fit-row"):
                     yield Static("", id="mismatch")
@@ -145,6 +149,9 @@ class TrainScreen(Screen):
         self.query_one("#model-line", Static).update(
             f"{mode} [b]{self.model_name}[/b] · {self.spec.total_params():,} params · {weights}")
         self.query_one("#fit-row").display = False
+        self._monitor = None
+        self._sample_system()
+        self.set_interval(1.0, self._sample_system)
         self._apply_previous_dataset()
         self._update_source_fields()
         if self.finetune:
@@ -153,6 +160,24 @@ class TrainScreen(Screen):
         self.query_one("#log", RichLog).write(
             "[dim]Tip: start with the defaults. If validation loss rises while train loss falls, the "
             "model is overfitting - add Dropout, lower epochs or use early stopping.[/]")
+
+    # -- system monitor --------------------------------------------------------
+
+    @work(thread=True, exclusive=True, group="sysmon")
+    def _sample_system(self) -> None:
+        from ..sysinfo import Monitor, specs
+
+        panel = self.query_one("#sysmon", SystemPanel)
+        if self._monitor is None:
+            self.app.call_from_thread(panel.set_specs, specs())
+            self._monitor = Monitor()
+            return  # the first CPU reading needs a time interval to be meaningful
+        sample = self._monitor.sample()
+        self.app.call_from_thread(panel.update_sample, sample)
+
+    @on(Select.Changed, "#device")
+    def _device_changed(self, event: Select.Changed) -> None:
+        self.query_one("#sysmon", SystemPanel).set_device_choice(str(event.value))
 
     def _apply_previous_dataset(self) -> None:
         prev = self.spec.data.get("dataset_cfg")
@@ -204,6 +229,26 @@ class TrainScreen(Screen):
             sel.set_options([(c, c) for c in cols])
             if current in cols:
                 sel.value = current
+
+    @on(Button.Pressed, "#browse-data")
+    def _browse_data(self) -> None:
+        from .browser import CSV_EXT, FileBrowser
+
+        src = self.query_one("#source", Select).value
+        current = self.query_one("#path", Input).value.strip()
+        if src == "image_folder":
+            dlg = FileBrowser("Choose an image folder", mode="dir", start=current or None,
+                              hint="Pick the folder that contains one sub-folder per class "
+                                   "(e.g. cat/, dog/). The preview shows how many images each class has.")
+        else:
+            dlg = FileBrowser("Choose a CSV file", mode="file", extensions=CSV_EXT, start=current or None,
+                              hint="Pick a .csv file. The preview shows its columns and first rows.")
+
+        def done(path):
+            if path:
+                self.query_one("#path", Input).value = path
+                self._refresh_columns()
+        self.app.push_screen(dlg, done)
 
     def _data_cfg(self) -> dict:
         def val(sel_id):
@@ -372,6 +417,7 @@ class TrainScreen(Screen):
         self.query_one("#start", Button).disabled = True
         self.query_one("#stop", Button).disabled = False
         self.query_one("#progress", ProgressBar).update(total=cfg.epochs, progress=0)
+        self._batch_size, self._device = cfg.batch_size, pick_device(cfg.device).type
         call = self.app.call_from_thread
         self.trainer = Trainer(
             self.spec, model, self.train_ds, self.val_ds, cfg,
@@ -382,6 +428,8 @@ class TrainScreen(Screen):
         self._run(save_as, model)
 
     def _on_batch(self, epoch, step, steps, loss, epochs) -> None:
+        self.query_one("#sysmon", SystemPanel).training_progress(
+            ((epoch - 1) * steps + step) * self._batch_size, self._device)
         self.query_one("#progress", ProgressBar).update(progress=epoch - 1 + step / steps)
         self.query_one("#epoch-label", Static).update(f"  epoch {epoch}/{epochs} · batch {step}/{steps} · "
                                                        f"loss {loss:.4f}")
@@ -417,6 +465,7 @@ class TrainScreen(Screen):
 
     def _finished(self, run, save_as, model, error) -> None:
         self.trainer = None
+        self.query_one("#sysmon", SystemPanel).training_stopped()
         self.query_one("#start", Button).disabled = False
         self.query_one("#stop", Button).disabled = True
         log = self.query_one("#log", RichLog)

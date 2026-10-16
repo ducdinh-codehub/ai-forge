@@ -79,6 +79,15 @@ async def main():
         home.query_one("#models", DataTable).move_cursor(row=1); await pilot.pause()
         await pilot.press("t"); await pilot.pause(0.6)
         s = app.screen
+        s.query_one("#source", Select).value = "csv"; await pilot.pause(0.3)
+        s.query_one("#browse-data").press(); await pilot.pause(0.5)
+        fb = app.screen
+        fb.go(Path(__file__).resolve().parent.parent / "examples"); await pilot.pause(0.5)
+        fb._set_selected(Path(__file__).resolve().parent.parent / "examples" / "fruit_size.csv")
+        await pilot.pause(0.4)
+        shot("15-file-browser", "AIForge – browsing for data")
+        await pilot.press("escape"); await pilot.pause(0.3)
+        s.query_one("#source", Select).value = "synthetic"; await pilot.pause(0.3)
         s.query_one("#epochs", Input).value = "40"
         s.query_one("#lr", Input).value = "0.005"
         s.query_one("#load").press()

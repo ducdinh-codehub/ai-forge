@@ -10,7 +10,11 @@ dependencies = [
     "safetensors>=0.4",
     "onnx>=1.15",
     "pillow",
+    "psutil>=5.9",
 ]
+
+[project.optional-dependencies]
+nvidia = ["nvidia-ml-py>=12"]  # GPU utilisation / temperature on NVIDIA cards
 
 [project.scripts]
 aiforge = "aiforge.__main__:main"

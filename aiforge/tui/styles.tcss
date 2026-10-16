@@ -40,6 +40,8 @@ Screen { background: $background; }
 #train-config .row { height: auto; }
 #train-config .row > Vertical { height: auto; width: 1fr; margin-right: 1; }
 #train-config .group { height: auto; }
+#train-config .path-row { height: auto; }
+#train-config .path-row Input { width: 1fr; }
 #train-config #load { margin-top: 1; width: 100%; }
 #train-config .switch-row { height: auto; margin-top: 1; }
 #train-config .switch-row Label { margin: 1 0 0 1; }

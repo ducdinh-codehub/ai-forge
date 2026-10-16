@@ -10,7 +10,24 @@ from textual.widgets import Button, Input, Label, Select, Static
 from ..spec import TEMPLATES, from_template, safe_name
 
 
+def browse_into(screen, target: Input, **kwargs) -> None:
+    """Open the file browser and put the chosen path into ``target``."""
+    from .browser import FileBrowser
+
+    current = target.value.strip()
+    kwargs.setdefault("start", current or None)
+
+    def done(path):
+        if path:
+            target.value = path
+            target.focus()
+    screen.app.push_screen(FileBrowser(**kwargs), done)
+
+
 class Dialog(ModalScreen):
+    """Base dialog. Note: Textual calls ``on_button_pressed`` of *every* class in the MRO, so
+    subclasses handle only their own buttons and must not call ``super()`` for it."""
+
     BINDINGS = [Binding("escape", "cancel", "Cancel")]
     DEFAULT_CSS = """
     Dialog { align: center middle; }
@@ -24,6 +41,9 @@ class Dialog(ModalScreen):
     Dialog Label { margin-top: 1; }
     Dialog .buttons { height: auto; margin-top: 1; align-horizontal: right; }
     Dialog .buttons Button { margin-left: 1; }
+    Dialog .path-row { height: auto; }
+    Dialog .path-row Input { width: 1fr; }
+    Dialog .path-row Button { margin-left: 1; }
     """
 
     def action_cancel(self) -> None:
@@ -77,8 +97,6 @@ class SaveChangesDialog(Dialog):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "discard":
             self.dismiss(False)
-        else:
-            super().on_button_pressed(event)
 
     def submit(self) -> None:
         self.dismiss(True)
@@ -88,10 +106,12 @@ class TextDialog(Dialog):
     """Ask for a single value."""
 
     def __init__(self, title: str, label: str, value: str = "", hint: str = "",
-                 validate=None):
+                 validate=None, browse: dict | None = None):
+        """browse: FileBrowser kwargs; adds a Browse button next to the input."""
         super().__init__()
         self._title, self._label, self._value, self._hint = title, label, value, hint
         self._validate = validate
+        self._browse = browse
 
     def compose(self) -> ComposeResult:
         with Vertical():
@@ -99,9 +119,18 @@ class TextDialog(Dialog):
             if self._hint:
                 yield Static(self._hint, classes="hint")
             yield Label(self._label)
-            yield Input(self._value, id="value")
+            if self._browse is not None:
+                with Horizontal(classes="path-row"):
+                    yield Input(self._value, id="value")
+                    yield Button("📂 Browse", id="browse")
+            else:
+                yield Input(self._value, id="value")
             yield Static("", id="error", classes="error")
             yield self.buttons()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "browse":
+            browse_into(self, self.query_one("#value", Input), **self._browse)
 
     def submit(self) -> None:
         v = self.query_one("#value", Input).value.strip()
@@ -160,13 +189,24 @@ class ImportDialog(Dialog):
                          "[b]Only import .pt files you trust[/b] - they can run code when loaded.",
                          classes="hint")
             yield Label("File or folder path")
-            yield Input(placeholder="~/Downloads/model.aiforge.zip", id="path")
+            with Horizontal(classes="path-row"):
+                yield Input(placeholder="~/Downloads/model.aiforge.zip", id="path")
+                yield Button("📂 Browse", id="browse")
             yield Label("Name (optional)")
             yield Input(placeholder="keep original", id="name")
             yield Label("Input shape (only needed for .pt files that start with a conv layer)")
             yield Input(placeholder="e.g. 3,32,32", id="shape")
             yield Static("", id="error", classes="error")
             yield self.buttons("Import")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "browse":
+            from .browser import MODEL_EXT
+
+            browse_into(self, self.query_one("#path", Input), title="Choose a model to import",
+                        mode="any", extensions=MODEL_EXT,
+                        hint="Pick an AIForge .zip bundle / model folder, a .json structure, "
+                             "a .safetensors file or a PyTorch .pt/.pth file.")
 
     def submit(self) -> None:
         path = self.query_one("#path", Input).value.strip()

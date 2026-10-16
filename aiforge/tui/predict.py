@@ -28,6 +28,7 @@ class PredictScreen(Screen):
             yield Label("", id="hint")
             with Horizontal(classes="input-row"):
                 yield Input(id="raw", placeholder="type an input and press Enter")
+                yield Button("📂 Browse", id="browse-raw")
                 yield Button("Predict", id="go", variant="primary")
             yield Static("", id="result")
             yield Static("Batch prediction", classes="section-title")
@@ -35,6 +36,7 @@ class PredictScreen(Screen):
                          classes="hint")
             with Horizontal(classes="input-row"):
                 yield Input(id="batch-src", placeholder="~/data/new_rows.csv  or  ~/photos/")
+                yield Button("📂 Browse", id="browse-batch")
                 yield Input(id="batch-dst", placeholder="output .csv (optional)")
                 yield Button("Run batch", id="batch")
             yield RichLog(id="predict-log", markup=True, wrap=True)
@@ -55,6 +57,9 @@ class PredictScreen(Screen):
                 "[yellow]⚠ No preprocessing info saved (model wasn't trained here) - "
                 "inputs are used as-is.[/]")
         self.query_one("#hint", Label).update(f"Input: {input_hint(self.spec)}")
+        self.is_image = self.spec.data.get("preprocess", {}).get("type") == "image" or \
+            len(self.spec.input_shape) == 3
+        self.query_one("#browse-raw").display = self.is_image
         self.query_one("#raw", Input).focus()
 
     @on(Input.Submitted, "#raw")
@@ -77,6 +82,33 @@ class PredictScreen(Screen):
             box.update("\n".join(lines))
         else:
             box.update("\n".join(f"[b]{label}: {v:.6g}[/b]" for label, v in res))
+
+    @on(Button.Pressed, "#browse-raw")
+    def _browse_raw(self) -> None:
+        from .browser import FileBrowser
+        from ..data import IMAGE_EXT
+
+        def done(path):
+            if path:
+                self.query_one("#raw", Input).value = path
+                self._predict()
+        self.app.push_screen(FileBrowser("Choose an image to classify", mode="file",
+                                         extensions=IMAGE_EXT,
+                                         start=self.query_one("#raw", Input).value.strip() or None), done)
+
+    @on(Button.Pressed, "#browse-batch")
+    def _browse_batch(self) -> None:
+        from .browser import CSV_EXT, FileBrowser
+
+        def done(path):
+            if path:
+                self.query_one("#batch-src", Input).value = path
+        self.app.push_screen(FileBrowser(
+            "Choose data to predict", mode="dir" if self.is_image else "file",
+            extensions=None if self.is_image else CSV_EXT,
+            start=self.query_one("#batch-src", Input).value.strip() or None,
+            hint="Pick a folder of images." if self.is_image else
+                 "Pick a CSV file with one input per row."), done)
 
     @on(Button.Pressed, "#batch")
     def _batch(self) -> None:
