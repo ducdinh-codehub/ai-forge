@@ -97,6 +97,9 @@ async def main():
         await pilot.click("#start")
         await wait_for(pilot, lambda: s.trainer is None and s.loss_hist); await pilot.pause(0.5)
         shot("06-train-done", "AIForge – training")
+        s.query_one("#guide-btn").press(); await pilot.pause(0.6)
+        shot("16-train-guide", "AIForge – guide panel while training")
+        s.query_one("#guide-drawer").display = False; await pilot.pause(0.2)
         await pilot.press("escape"); await pilot.pause()
 
         # Fine-tune: load blobs, auto-fit, freeze body

@@ -327,8 +327,23 @@ How to read it:
 > On NVIDIA GPUs, install the optional extra to see GPU usage, temperature and power:
 > `.venv/bin/pip install -e ".[nvidia]"`
 
-**Right side (below the panel):** loss and accuracy charts, a progress bar, and a log of each epoch. Click
-**■ Stop** at any time. AIForge always keeps the **best** version, i.e. the epoch with the
+**Right side (below the panel):** loss and accuracy charts, a progress bar, and a log of each epoch.
+
+**📖 Guide panel:** click **📖 Guide** (next to Start/Stop) or press **F1** to slide open a
+panel on the right. You can keep changing settings and training while it's open.
+
+![Guide panel while training](docs/images/16-train-guide.svg)
+
+| Topic | What you'll read |
+|---|---|
+| 📈 Reading the charts (live) | A **live diagnosis of the current run** that updates every epoch, e.g. *"✅ Looks healthy"*, *"⚠️ Overfitting: validation loss has risen… the best epoch was 7"*, *"⚠️ the loss goes up and down a lot - learning rate too high"*. It also explains how to read the charts. |
+| ⚙ Your training settings | Each setting explained **with the values you've chosen**, e.g. *"1,599 examples × 12 epochs with batches of 64 = 25 updates per epoch, 300 in total"*. It warns about risky values (e.g. a learning rate that's too high) and updates as you type. |
+| 🧭 Overview & review | The model being trained, explained step by step, with a design review |
+| 1. Linear, 2. ReLU, … | Each layer of the model with its real shapes and parameter counts |
+
+**Full guide ⤢** opens the full-screen guide. **✕**, **Esc** or **F1** closes the panel.
+
+Click **■ Stop** at any time. AIForge always keeps the **best** version, i.e. the epoch with the
 lowest validation loss.
 
 ### 5.4 Fine-tune: reuse a trained model for a new task
@@ -571,6 +586,7 @@ You can change any template after creating it.
 | Home | | Builder | | Train / Fine-tune | |
 |---|---|---|---|---|---|
 | `n` | New model | `a` | Go to the layer list | `Ctrl+R` | Start training |
+| | | | | `F1` | Open / close the Guide panel |
 | `i` | Import | `Enter` | Add the highlighted layer | `Esc` | Back (stop training first) |
 | `e` / `Enter` | Edit structure | `Del` | Remove layer | | |
 | `t` | Train | `Shift+↑ / ↓` | Move layer | | |

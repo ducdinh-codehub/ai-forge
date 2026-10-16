@@ -596,3 +596,175 @@ def model_card_markdown(spec: ModelSpec) -> str:
           "**Design review**", ""] + [f"- {n}" for n in notes[:4]]
     md += ["", "*Press **?** for a step-by-step walk-through.*"]
     return "\n".join(md)
+
+
+# ---------------------------------------------------------------------------
+# Training screen topics
+# ---------------------------------------------------------------------------
+
+
+def _num(v, cast=float):
+    try:
+        return cast(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def training_settings_markdown(spec: ModelSpec, values: dict, n_train: int | None,
+                               finetune: bool = False, frozen_params: int = 0) -> str:
+    """Explain each training setting using the values currently on screen."""
+    epochs = _num(values.get("epochs"), int)
+    batch = _num(values.get("batch_size"), int)
+    lr = _num(values.get("lr"))
+    wd = _num(values.get("weight_decay")) or 0.0
+    patience = _num(values.get("early_stop"), int) or 0
+    val_split = _num(values.get("val_split"))
+    opt, sched, device = values.get("optimizer"), values.get("scheduler"), values.get("device")
+    total = sum(i.params for i in spec.analyze())
+    md = ["# Your training settings", "",
+          "Training repeats one simple loop: take a **batch** of examples, let the model guess, "
+          "measure how wrong it is (the **loss**), and nudge every parameter a little in the "
+          "direction that reduces the loss. The settings below control that loop.", ""]
+
+    md += ["## Epochs" + (f" = {epochs}" if epochs else "")]
+    if epochs and batch and n_train:
+        steps = max(1, -(-n_train // batch))
+        md.append(f"The model sees all **{n_train:,}** training examples {epochs} times. With batches of "
+                  f"{batch} that's **{steps:,} updates per epoch** and **{steps * epochs:,} in total**.")
+    else:
+        md.append("One epoch = one pass over the whole training set. Load data to see the exact numbers.")
+    md += ["", "- Too few → the model hasn't finished learning (*underfitting*).",
+           "- Too many → it starts memorising (*overfitting*). Early stopping protects you.", ""]
+
+    md += ["## Batch size" + (f" = {batch}" if batch else ""),
+           "How many examples are processed together before each update. Bigger batches use more "
+           "memory and give smoother, faster epochs; smaller batches update more often and sometimes "
+           "generalise better. 32–128 is a good range."]
+    if batch and n_train and batch > n_train:
+        md.append(f"\n⚠️ The batch is larger than the dataset ({n_train:,} examples) - lower it.")
+    md.append("")
+
+    md += ["## Learning rate" + (f" = {values.get('lr')}" if lr else ""),
+           "How big each nudge is. This is the most important setting."]
+    if lr is not None:
+        if lr > 0.01:
+            md.append(f"\n⚠️ **{lr:g} is high.** If the loss jumps around or becomes `nan`, lower it.")
+        elif lr < 1e-4 and not finetune:
+            md.append(f"\n💡 **{lr:g} is low** - learning will be slow. Fine for fine-tuning, but for "
+                      "training from scratch 0.001 is a common start.")
+        else:
+            md.append(f"\n✅ {lr:g} is a sensible value" + (" for fine-tuning." if finetune else "."))
+    md.append("")
+
+    md += [f"## Optimizer = {opt}" if opt else "## Optimizer", {
+        "Adam": "**Adam** adapts the step size for every parameter automatically. The safest default.",
+        "AdamW": "**AdamW** is Adam with weight decay done the right way - popular for Transformers.",
+        "SGD": "**SGD** (with momentum 0.9) is simple and can generalise well, but usually needs a "
+               "higher learning rate (0.01–0.1) and more epochs.",
+    }.get(opt, "The rule used to update parameters."), ""]
+
+    md += [f"## Weight decay = {wd:g}",
+           "Gently pulls weights towards zero so the model prefers simple solutions - a defence "
+           "against overfitting. " + ("Currently **off**; try 0.01 if the model overfits." if not wd
+                                       else "Typical values are 0.0001–0.05."), ""]
+
+    md += [f"## LR schedule = {sched}" if sched else "## LR schedule", {
+        "none": "**constant** - the learning rate stays the same for the whole run.",
+        "cosine": "**cosine** - starts at your learning rate and smoothly lowers it to ~0, which "
+                  "often squeezes out a little extra accuracy at the end.",
+        "step": "**step** - divides the learning rate by 10 every third of the run.",
+    }.get(sched, ""), ""]
+
+    md += [f"## Early stop = {patience}" if patience else "## Early stop = off",
+           (f"Training stops if validation loss hasn't improved for **{patience} epochs** in a row."
+            if patience else "Off - all epochs run. Either way, AIForge **keeps the best epoch**, "
+                             "not the last one."), ""]
+
+    if val_split is not None:
+        md += [f"## Validation split = {val_split:g}",
+               f"{val_split:.0%} of the data is kept aside and never trained on. It's the honest test "
+               "of how the model will do on new data - watch the **val** lines in the charts.", ""]
+
+    md += [f"## Device = {device}" if device else "## Device",
+           "Where the maths runs. `auto` picks the GPU if there is one - see the 💻 panel for what "
+           "is actually being used.", ""]
+
+    md += ["## What is being learned",
+           f"The model has **{total:,} parameters**."]
+    if finetune:
+        md.append(f"In this fine-tuning run **{total - frozen_params:,}** are trainable and "
+                  f"**{frozen_params:,}** are frozen (they keep what the model already learned).")
+    md.append("Loss function: " + ("**cross-entropy** - rewards giving high probability to the correct class."
+                                   if spec.task == "classification" else
+                                   "**mean squared error** - the average squared distance to the true number."))
+    return "\n".join(md)
+
+
+def diagnose(train_loss: list[float], val_loss: list[float], val_metric: list[float],
+             task: str, n_classes: int) -> list[str]:
+    """Plain-language reading of the loss/metric curves so far."""
+    import math
+
+    if not train_loss:
+        return ["⏳ Start training - the diagnosis appears after the first epochs."]
+    if any(math.isnan(v) or math.isinf(v) for v in train_loss + val_loss):
+        return ["❌ **The loss became `nan`** - training broke down. Lower the learning rate a lot "
+                "(e.g. ÷10) and start again."]
+    notes = []
+    n = len(train_loss)
+    if n < 3:
+        notes.append(f"⏳ Only {n} epoch{'s' if n > 1 else ''} so far - trends need a few more epochs.")
+    else:
+        first, last = train_loss[0], train_loss[-1]
+        improve = (first - last) / max(abs(first), 1e-12)
+        diffs = [b - a for a, b in zip(train_loss, train_loss[1:])]
+        ups = sum(1 for d in diffs if d > 0)
+        if n >= 5 and ups / len(diffs) > 0.45:
+            notes.append("⚠️ **The training loss goes up and down a lot** - a sign the learning rate is "
+                         "too high. Try a smaller value.")
+        elif improve < 0.02:
+            notes.append("⚠️ **The training loss is barely moving.** The learning rate may be too low "
+                         "or the model too small for this data.")
+        if len(val_loss) >= 4:
+            v = val_loss
+            rising = v[-1] > v[-2] > v[-3] and min(v) < v[-1]
+            best = v.index(min(v)) + 1
+            if rising and train_loss[-1] < train_loss[-3]:
+                notes.append(f"⚠️ **Overfitting:** validation loss has risen for the last epochs while "
+                             f"training loss keeps falling. The best epoch was **{best}** (AIForge keeps "
+                             "it). Add Dropout, use fewer epochs or turn on Early stop.")
+            elif v[-1] > 1.5 * train_loss[-1] and v[-1] > 0.05:
+                notes.append("💡 Validation loss is clearly higher than training loss - the model does "
+                             "better on examples it has seen. Mild overfitting; more data or Dropout helps.")
+    if task == "classification" and val_metric and n_classes:
+        acc, chance = val_metric[-1], 1 / n_classes
+        if n >= 3 and acc < chance * 1.3:
+            notes.append(f"⚠️ Validation accuracy ({acc:.0%}) is close to random guessing "
+                         f"({chance:.0%} for {n_classes} classes) - the model isn't learning yet.")
+        elif acc >= 0.98:
+            notes.append(f"🎉 Validation accuracy is **{acc:.1%}** - excellent.")
+        else:
+            notes.append(f"Validation accuracy is **{acc:.1%}** (random guessing would be {chance:.0%}).")
+    if not any(x.startswith(("⚠️", "❌")) for x in notes) and n >= 3:
+        notes.insert(0, "✅ **Looks healthy:** the losses are going down.")
+    return notes
+
+
+def charts_markdown(train_loss, val_loss, val_metric, task: str, n_classes: int) -> str:
+    md = ["# Reading the charts", "", "## Live diagnosis of this run"]
+    md += [f"- {n}" for n in diagnose(train_loss, val_loss, val_metric, task, n_classes)]
+    md += ["", "## The two charts",
+           "**Loss** (left) measures how wrong the model is - lower is better. The *train* line is "
+           "measured on the examples it learns from, the *val* line on examples it never sees.", "",
+           ("**Accuracy** (right) is the share of correct answers on each set - higher is better."
+            if task == "classification" else
+            "**Mean absolute error** (right) is the average size of the mistake, in the units of "
+            "your target - lower is better."), "",
+           "## Common patterns",
+           "| You see | It means | Try |", "|---|---|---|",
+           "| both losses fall, then flatten | 👍 learning well | nothing - it's working |",
+           "| train falls, **val rises** | overfitting | Dropout, fewer epochs, Early stop, more data |",
+           "| both stay high and flat | underfitting / not learning | more epochs, bigger model, higher LR |",
+           "| lines jump wildly | learning rate too high | lower the learning rate |",
+           "| loss shows `nan` | training broke down | much lower learning rate, start again |"]
+    return "\n".join(md)

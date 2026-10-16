@@ -49,7 +49,7 @@ Screen { background: $background; }
 #train-status { width: 1fr; padding: 0 1; }
 #data-info { height: auto; margin-top: 1; }
 #fit-row { height: auto; margin-top: 1; }
-#mismatch { width: 1fr; height: auto; }
+#mismatch { width: 1fr; height: auto; padding: 0 0 0 2; }
 #epoch-label { width: 1fr; padding-top: 1; color: $text-muted; }
 #progress { margin: 1 0; }
 #charts { height: 12; }
@@ -66,3 +66,15 @@ Screen { background: $background; }
 #guide-nav-pane { width: 34; padding: 0 1; border-right: tall $panel; }
 #guide-nav { height: 1fr; }
 #guide-body { width: 1fr; padding: 0 2; }
+
+/* Training guide drawer ---------------------------------------------------- */
+#train-main { layers: base drawer; }
+#guide-drawer {
+    layer: drawer; dock: right; width: 46%; min-width: 60; height: 100%;
+    background: $surface; border-left: thick $accent; padding: 0 1; display: none;
+}
+#drawer-head { height: auto; margin-top: 1; }
+#drawer-title { width: 1fr; text-style: bold; color: $accent; padding-top: 1; }
+#drawer-head Button { margin-left: 1; min-width: 5; }
+#drawer-topics { height: auto; max-height: 12; margin-top: 1; }
+#drawer-body { height: 1fr; margin-top: 1; }
