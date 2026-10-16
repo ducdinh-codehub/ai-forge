@@ -1,0 +1,121 @@
+"""Regenerate the README screenshots in docs/images/.
+
+Run from the project root:  .venv/bin/python docs/make_screenshots.py
+It drives the app through a real session (create, build, train, fine-tune, use, export)
+in a throw-away workspace and saves each screen as an SVG.
+"""
+import asyncio, shutil, sys, tempfile, warnings
+warnings.filterwarnings("ignore")
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from aiforge.tui.app import AIForgeApp
+from textual.widgets import DataTable, Input, Select, SelectionList, OptionList
+
+OUT = Path(__file__).resolve().parent / "images"
+OUT.mkdir(exist_ok=True)
+WS = Path(tempfile.mkdtemp(prefix="aiforge-shots-"))
+SIZE = (150, 44)
+
+async def wait_for(pilot, cond, timeout=120):
+    for _ in range(int(timeout * 10)):
+        if cond(): return
+        await pilot.pause(0.1)
+    raise TimeoutError
+
+async def main():
+    app = AIForgeApp(WS)
+    async with app.run_test(size=SIZE) as pilot:
+        await pilot.pause(0.3)
+        app.sub_title = "workspace: ./workspace"; await pilot.pause(0.3)
+        def shot(name, title):
+            app.save_screenshot(str(OUT / f"{name}.svg"), )
+            # retitle the window chrome
+            p = OUT / f"{name}.svg"; p.write_text(p.read_text().replace(">AIForgeApp<", f">{title}<"))
+            print("saved", name)
+        shot("01-home-empty", "AIForge – first launch")
+
+        # New model dialog
+        await pilot.press("n"); await pilot.pause()
+        app.screen.query_one("#name", Input).value = "spiral-classifier"
+        await pilot.pause(0.3)
+        shot("02-new-model", "AIForge – create a new model")
+        app.screen.submit(); await pilot.pause(0.6)
+
+        # Builder: select a Linear layer so the settings panel shows
+        b = app.screen; t = b.query_one("#stack", DataTable)
+        t.focus(); t.move_cursor(row=4); await pilot.pause(0.5)
+        pal = b.query_one("#palette", OptionList)
+        pal.highlighted = next(i for i in range(pal.option_count) if pal.get_option_at_index(i).id == "Dropout")
+        await pilot.pause(0.3)
+        shot("03-builder", "AIForge – model builder")
+        await pilot.press("ctrl+s"); await pilot.pause(); await pilot.press("escape"); await pilot.pause()
+
+        # Builder error example (CNN template with a misplaced layer) -- separate model
+        await pilot.press("n"); await pilot.pause()
+        app.screen.query_one("#name", Input).value = "digit-reader"
+        app.screen.query_one("#template", Select).value = "Small CNN (28×28 grayscale, e.g. MNIST)"
+        app.screen.submit(); await pilot.pause(0.6)
+        b = app.screen; t = b.query_one("#stack", DataTable)
+        t.focus(); t.move_cursor(row=9); await pilot.pause(0.3)
+        b.add_layer("Conv2d"); await pilot.pause(0.6)
+        shot("04-builder-error", "AIForge – the builder catches mistakes")
+        await pilot.press("ctrl+z"); await pilot.pause(0.3)
+        await pilot.press("ctrl+s"); await pilot.pause(); await pilot.press("escape"); await pilot.pause()
+
+        # Train the spiral model
+        home = app.screen
+        home.query_one("#models", DataTable).move_cursor(row=1); await pilot.pause()
+        await pilot.press("t"); await pilot.pause(0.6)
+        s = app.screen
+        s.query_one("#epochs", Input).value = "40"
+        s.query_one("#lr", Input).value = "0.005"
+        s.query_one("#load").press()
+        await wait_for(pilot, lambda: s.info is not None); await pilot.pause(0.3)
+        shot("05-train-mismatch", "AIForge – data loaded, model needs auto-fit")
+        await pilot.click("#autofit"); await pilot.pause(0.3)
+        await pilot.click("#start")
+        await wait_for(pilot, lambda: s.trainer is None and s.loss_hist); await pilot.pause(0.5)
+        shot("06-train-done", "AIForge – training")
+        await pilot.press("escape"); await pilot.pause()
+
+        # Fine-tune: load blobs, auto-fit, freeze body
+        home.query_one("#models", DataTable).move_cursor(row=1); await pilot.pause()
+        await pilot.press("f"); await pilot.pause(0.6)
+        s = app.screen
+        s.query_one("#kind", Select).value = "blobs"; await pilot.pause()
+        s.query_one("#load").press()
+        await wait_for(pilot, lambda: s.info is not None)
+        await pilot.click("#autofit"); await pilot.pause(0.3)
+        s.query_one("#freeze-body").press(); await pilot.pause(0.3)
+        s.query_one("#train-config").scroll_end(animate=False); await pilot.pause(0.3)
+        shot("07-finetune", "AIForge – fine-tuning")
+        await pilot.press("escape"); await pilot.pause()
+
+        # Predict
+        home.query_one("#models", DataTable).move_cursor(row=1); await pilot.pause()
+        await pilot.press("p"); await pilot.pause(0.6)
+        s = app.screen
+        s.query_one("#raw", Input).value = "0.1, 0.45"; await pilot.press("enter"); await pilot.pause(0.3)
+        shot("08-predict", "AIForge – using a trained model")
+        await pilot.press("escape"); await pilot.pause()
+
+        # Export
+        await pilot.press("x"); await pilot.pause(0.6)
+        s = app.screen
+        sl = s.query_one("#formats", SelectionList); sl.select("onnx"); sl.select("pytorch_py"); await pilot.pause()
+        s.query_one("#out", Input).value = "./workspace/exports/spiral-classifier"
+        await pilot.click("#go")
+        await wait_for(pilot, lambda: any("Done" in str(l.text) for l in s.query_one("#export-log").lines))
+        await pilot.pause(0.3)
+        shot("09-export", "AIForge – exporting")
+        await pilot.press("escape"); await pilot.pause()
+
+        # Home with models
+        home.query_one("#models", DataTable).move_cursor(row=1); await pilot.pause(0.5)
+        shot("10-home", "AIForge – model library")
+        await pilot.press("i"); await pilot.pause(0.3)
+        app.screen.query_one("#path", Input).value = "~/Downloads/my-model.aiforge.zip"; await pilot.pause()
+        shot("11-import", "AIForge – import a model")
+
+asyncio.run(main())
+shutil.rmtree(WS, ignore_errors=True)

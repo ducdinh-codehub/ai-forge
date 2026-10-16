@@ -206,7 +206,7 @@ class Workspace:
                 "layers": len(spec.layers),
                 "trained": (d / "weights.pt").exists(),
                 "epochs": sum(len(r.get("epochs", [])) for r in hist),
-                "modified": time.strftime("%Y-%m-%d %H:%M", time.localtime(f.stat().st_mtime)),
+                "modified": time.strftime("%b %d %H:%M", time.localtime(f.stat().st_mtime)),
             })
         return rows
 
