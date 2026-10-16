@@ -23,7 +23,7 @@ way; [the glossary](#9-words-you-will-see) explains each one in plain language.
 2. [Install](#2-install)
 3. [Start the app](#3-start-the-app)
 4. [Tutorial: your first model in 5 minutes](#4-tutorial-your-first-model-in-5-minutes)
-5. [Every screen explained](#5-every-screen-explained)
+5. [Every screen explained](#5-every-screen-explained) (including the built-in [Guide](#58-guide-learn-what-each-layer-does))
 6. [Using your own data](#6-using-your-own-data)
 7. [Which template should I choose?](#7-which-template-should-i-choose)
 8. [How to read the training charts](#8-how-to-read-the-training-charts)
@@ -145,6 +145,10 @@ In the screenshot, layer 4 (`Linear`, 64 → 32) has `64×32 + 32 = 2,080` param
 73% of the model. The bar at the bottom shows the total (2,850), the size (0.01 MB), and
 **✓ ready to train**.
 
+**Want to know what a layer does?** Select it and press **`Ctrl+E`** to switch the right
+panel to the **Explain** tab, or press **`?`** for the full guide. See
+[5.8 Guide](#58-guide-learn-what-each-layer-does).
+
 You don't need to change anything for this tutorial. Press **`Ctrl+S`** to save, then
 **`Esc`** to go back.
 
@@ -230,6 +234,7 @@ See [Step 2](#step-2-look-at-the-model-builder-screen) for the layout. Useful ac
 | Remove a layer | `Del` |
 | Undo | `Ctrl+Z` |
 | Save | `Ctrl+S` |
+| Learn what the selected layer does | `Ctrl+E` (Explain tab) or `?` (full guide) |
 
 > If you change a model that is **already trained**, layers you didn't touch **keep what they
 > learned**. Only new or resized layers start from scratch.
@@ -343,6 +348,57 @@ Press **`i`** on the home screen and enter a file path.
 
 > ⚠️ **Only import `.pt` / `.pth` files from people you trust.** These files can contain
 > hidden code that runs when they are opened.
+
+### 5.8 Guide: learn what each layer does
+
+New to neural networks? AIForge explains every part of your model in plain language. There
+are two ways to open the explanations.
+
+**A. The Explain tab (inside the builder)**
+
+Press **`Ctrl+E`** (or click **Explain** at the top of the right panel). It explains the
+selected layer **using your model's real numbers**:
+
+![Explain tab](docs/images/12-builder-explain.svg)
+
+- what the layer does, in one sentence
+- what it does **in your model**, e.g. *"combines all 10 values into 64 new values"*
+- its input/output shape and how its parameter count is calculated (`10×64 + 64 = 704`)
+- an everyday analogy and the most important tip
+
+The text updates as you change settings. Select the **Input** row to get a summary of the
+whole model and a quick design review. Press `Ctrl+E` again to return to Settings.
+
+**B. The full Guide (`?` in the builder, `g` or 📖 Guide on the home screen)**
+
+A full-screen reader with three parts:
+
+1. **Overview & review**: the whole model explained step by step. It covers what goes in,
+   what each layer does to the data, where the parameters are, how the model learns, and a
+   **design review** that points out common mistakes.
+
+   ![Model guide](docs/images/13-guide-overview.svg)
+
+2. **Each layer of your model**: the real numbers for that layer, followed by the full
+   article about that layer type.
+3. **Layer encyclopedia**: an article for every layer AIForge offers, with how it works, a
+   diagram, each setting explained, when to use it, and tips.
+
+   ![Layer encyclopedia](docs/images/14-guide-encyclopedia.svg)
+
+Use **↑ / ↓** to pick a topic and **→** (or Enter) to scroll the text. **`Esc`** goes back.
+
+**What the design review checks**
+
+| Message | Why it matters |
+|---|---|
+| ⚠️ Two Linear layers with no activation between them | Without a ReLU (or similar) between them, two Linear layers can only learn what a single one could |
+| ⚠️ Classification model ends with Sigmoid/ReLU/… | The training loss expects raw scores, so the extra activation hurts learning |
+| ⚠️ Transformer without PositionalEncoding | The model can't tell word or patch order |
+| 💡 A huge Linear layer right after Flatten | GlobalAvgPool or more pooling would make the model far smaller |
+| 💡 Big model with no Dropout | Dropout helps if the model starts overfitting |
+| 💡 Several Conv2d layers without BatchNorm | BatchNorm usually makes CNNs train faster |
+| ❌ Shape errors | A layer can't accept the data it receives |
 
 ---
 
@@ -478,6 +534,8 @@ You can change any template after creating it.
 | `f` | Fine-tune | `Ctrl+D` | Duplicate layer | | |
 | `p` | Use (predict) | `Ctrl+Z` | Undo | | |
 | `x` | Export | `Ctrl+S` | Save | | |
+| `g` | Guide | `Ctrl+E` | Settings ↔ Explain tab | | |
+| | | `?` | Full guide | | |
 | `w` | Load weights | | | | |
 | `c` | Duplicate model | | | | |
 | `r` | Rename | | | | |
@@ -534,7 +592,8 @@ aiforge/
 ├── trainer.py       training / fine-tuning loop
 ├── predict.py       single and batch predictions
 ├── model_io.py      export and import
-└── tui/             the terminal interface (Textual): home, builder, train, predict, export
+├── guide.py         plain-language explanations: layer encyclopedia, model walk-through, design review
+└── tui/             the terminal interface (Textual): home, builder, train, predict, export, guide
 docs/
 ├── images/              README screenshots
 └── make_screenshots.py  regenerates them: .venv/bin/python docs/make_screenshots.py
