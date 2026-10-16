@@ -22,6 +22,7 @@ Build, train and share neural networks - no code needed.
  [reverse] f [/reverse] [b]Fine-tune[/b]  adapt a trained model to new data
  [reverse] p [/reverse] [b]Use[/b]        get predictions from the model
  [reverse] x [/reverse] [b]Export[/b]     save it as .pt, .safetensors, ONNX, …
+ [reverse] g [/reverse] [b]Guide[/b]      learn what every layer of a model does
 
 Already have a model? Press [reverse] i [/reverse] to import it.
 
@@ -38,6 +39,7 @@ class HomeScreen(Screen):
         Binding("f", "finetune", "Fine-tune"),
         Binding("p", "predict", "Use"),
         Binding("x", "export", "Export"),
+        Binding("g,question_mark", "guide", "Guide"),
         Binding("w", "load_weights", "Load weights", show=False),
         Binding("c", "duplicate", "Duplicate", show=False),
         Binding("r", "rename", "Rename", show=False),
@@ -68,6 +70,7 @@ class HomeScreen(Screen):
                     yield Button("⟳ Fine-tune", id="finetune", variant="warning")
                     yield Button("◉ Use", id="predict")
                     yield Button("⇩ Export", id="export")
+                    yield Button("📖 Guide", id="guide")
                 with VerticalScroll(id="details"):
                     yield Static(WELCOME, id="details-text")
         yield Footer()
@@ -195,6 +198,12 @@ class HomeScreen(Screen):
             from .export import ExportScreen
 
             self.app.push_screen(ExportScreen(name))
+
+    def action_guide(self) -> None:
+        if name := self._need_model():
+            from .guide import GuideScreen
+
+            self.app.push_screen(GuideScreen(self.ws.load_spec(name)))
 
     def action_import(self) -> None:
         def done(res):

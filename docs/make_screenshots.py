@@ -48,6 +48,18 @@ async def main():
         pal.highlighted = next(i for i in range(pal.option_count) if pal.get_option_at_index(i).id == "Dropout")
         await pilot.pause(0.3)
         shot("03-builder", "AIForge – model builder")
+        await pilot.press("ctrl+e"); await pilot.pause(0.6)
+        shot("12-builder-explain", "AIForge – the Explain tab")
+        await pilot.press("ctrl+e"); await pilot.pause(0.3)
+        t.focus(); t.move_cursor(row=0); await pilot.pause(0.3)
+        await pilot.press("question_mark"); await pilot.pause(0.8)
+        shot("13-guide-overview", "AIForge – model guide")
+        nav = app.screen.query_one("#guide-nav", OptionList)
+        nav.highlighted = next(i for i in range(nav.option_count)
+                               if nav.get_option_at_index(i).id == "type:Conv2d")
+        await pilot.pause(0.8)
+        shot("14-guide-encyclopedia", "AIForge – layer encyclopedia")
+        await pilot.press("escape"); await pilot.pause(0.3)
         await pilot.press("ctrl+s"); await pilot.pause(); await pilot.press("escape"); await pilot.pause()
 
         # Builder error example (CNN template with a misplaced layer) -- separate model

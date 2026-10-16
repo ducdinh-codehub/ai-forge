@@ -9,9 +9,11 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
-from textual.widgets import Button, DataTable, Footer, Header, Input, Label, OptionList, Select, Static, Switch
+from textual.widgets import (Button, DataTable, Footer, Header, Input, Label, Markdown, OptionList, Select, Static,
+                             Switch, TabbedContent, TabPane)
 from textual.widgets.option_list import Option
 
+from ..guide import layer_card_markdown, model_card_markdown
 from ..layers import REGISTRY, by_category, coerce
 from ..spec import LayerSpec, ModelSpec, remap_state, safe_name
 from .modals import SaveChangesDialog
@@ -53,6 +55,8 @@ class BuilderScreen(Screen):
         Binding("shift+down,J", "move(1)", "Move down"),
         Binding("ctrl+d", "duplicate_layer", "Duplicate"),
         Binding("ctrl+z", "undo", "Undo"),
+        Binding("question_mark,f1", "guide", "Guide"),
+        Binding("ctrl+e", "toggle_explain", "Explain tab"),
     ]
 
     def __init__(self, spec: ModelSpec, is_new: bool = False):
@@ -90,8 +94,12 @@ class BuilderScreen(Screen):
                     yield Button("Undo", id="undo")
                     yield Static(classes="spacer")
                     yield Button("Save", id="save", variant="primary")
-            with VerticalScroll(id="props"):
-                pass
+            with TabbedContent(id="side-tabs", initial="tab-settings"):
+                with TabPane("Settings", id="tab-settings"):
+                    yield VerticalScroll(id="props")
+                with TabPane("Explain", id="tab-explain"):
+                    with VerticalScroll(id="explain-scroll"):
+                        yield Markdown(id="explain")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -137,6 +145,7 @@ class BuilderScreen(Screen):
                 t.add_row(*row, key=str(r))
         t.move_cursor(row=max(0, min(keep, len(rows) - 1)))
         self._update_totals(infos)
+        self.update_explain()
 
     def _update_totals(self, infos) -> None:
         total = sum(i.params for i in infos)
@@ -169,6 +178,33 @@ class BuilderScreen(Screen):
         target = "__model__" if idx is None else self.spec.layers[idx].id
         if target != self._props_for:
             self.show_props()
+            self.update_explain()
+
+    def update_explain(self) -> None:
+        """Refresh the Explain tab for the highlighted row (only while that tab is visible)."""
+        if self.query_one("#side-tabs", TabbedContent).active != "tab-explain":
+            return
+        idx = self.cursor_layer
+        if idx is None or idx >= len(self.spec.layers):
+            text = model_card_markdown(self.spec)
+        else:
+            text = layer_card_markdown(self.spec, idx)
+        self.query_one("#explain", Markdown).update(text)
+
+    @on(TabbedContent.TabActivated, "#side-tabs")
+    def _tab_changed(self) -> None:
+        self.update_explain()
+
+    def action_toggle_explain(self) -> None:
+        tabs = self.query_one("#side-tabs", TabbedContent)
+        tabs.active = "tab-settings" if tabs.active == "tab-explain" else "tab-explain"
+
+    def action_guide(self) -> None:
+        from .guide import GuideScreen
+
+        idx = self.cursor_layer
+        focus = "overview" if idx is None or idx >= len(self.spec.layers) else f"layer:{idx}"
+        self.app.push_screen(GuideScreen(self.spec, focus))
 
     def show_props(self) -> None:
         """Rebuild the properties panel (queued so rebuilds never overlap)."""

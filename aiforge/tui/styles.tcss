@@ -26,7 +26,11 @@ Screen { background: $background; }
 #stack-pane { width: 1fr; padding: 0 1; }
 #stack { height: 1fr; }
 #totals { height: auto; margin-top: 1; padding: 0 1; background: $boost; }
-#props { width: 36; padding: 0 1; border-left: tall $panel; }
+#side-tabs { width: 40; border-left: tall $panel; }
+#side-tabs TabPane { padding: 0; }
+#props { padding: 0 1; }
+#explain-scroll { padding: 0 1; }
+#explain { margin: 0; }
 #props Label { margin-top: 1; }
 #layer-io { background: $boost; padding: 0 1; height: auto; margin-bottom: 1; }
 
@@ -55,3 +59,8 @@ Screen { background: $background; }
 #result { height: auto; margin: 1 0; padding: 1 2; background: $boost; min-height: 3; }
 #predict-log, #export-log { height: 1fr; border: round $panel; margin-top: 1; }
 #formats { height: auto; max-height: 12; }
+
+/* Guide ------------------------------------------------------------------ */
+#guide-nav-pane { width: 34; padding: 0 1; border-right: tall $panel; }
+#guide-nav { height: 1fr; }
+#guide-body { width: 1fr; padding: 0 2; }
