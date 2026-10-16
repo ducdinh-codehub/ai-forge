@@ -1,0 +1,261 @@
+"""Model library: the starting screen."""
+from __future__ import annotations
+
+from textual import on, work
+from textual.app import ComposeResult
+from textual.binding import Binding
+from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.screen import Screen
+from textual.widgets import Button, DataTable, Footer, Header, Static
+
+from .. import model_io
+from ..spec import safe_name
+from .banner import Banner
+from .modals import ConfirmDialog, ImportDialog, NewModelDialog, TextDialog
+
+WELCOME = """[b]Welcome to AIForge[/b] - build, train and ship neural networks without writing code.
+
+[b]1. Create[/b]   [reverse] n [/reverse] new model from a template, then add/remove layers and watch
+           shapes and parameter counts update live.
+[b]2. Train[/b]    [reverse] t [/reverse] pick a dataset (CSV, image folder, MNIST, CIFAR-10, toy data) and train.
+[b]3. Fine-tune[/b] [reverse] f [/reverse] reuse a trained model on new data, freezing the layers you choose.
+[b]4. Use[/b]      [reverse] p [/reverse] try predictions on your own inputs or a whole file.
+[b]5. Export[/b]   [reverse] x [/reverse] weights (.pt / .safetensors), structure (.json / .py), TorchScript, ONNX.
+
+Already have a model? Press [reverse] i [/reverse] to import it."""
+
+
+class HomeScreen(Screen):
+    BINDINGS = [
+        Binding("n", "new", "New"),
+        Binding("i", "import", "Import"),
+        Binding("e", "edit", "Edit structure"),
+        Binding("t", "train", "Train"),
+        Binding("f", "finetune", "Fine-tune"),
+        Binding("p", "predict", "Use"),
+        Binding("x", "export", "Export"),
+        Binding("w", "load_weights", "Load weights", show=False),
+        Binding("c", "duplicate", "Duplicate", show=False),
+        Binding("r", "rename", "Rename", show=False),
+        Binding("delete,d", "delete", "Delete", show=False),
+        Binding("q", "app.quit", "Quit"),
+    ]
+
+    def compose(self) -> ComposeResult:
+        yield Header()
+        yield Banner(id="banner")
+        with Horizontal(id="home-body"):
+            with Vertical(id="library"):
+                yield Static("Model library", classes="section-title")
+                yield DataTable(id="models", cursor_type="row", zebra_stripes=True)
+                with Horizontal(classes="toolbar"):
+                    yield Button("✚ New", id="new", variant="primary")
+                    yield Button("⇪ Import", id="import")
+                    yield Button("Load weights", id="load_weights")
+                    yield Button("Duplicate", id="duplicate")
+                    yield Button("Rename", id="rename")
+                    yield Button("Delete", id="delete", variant="error")
+            with Vertical(id="details-pane"):
+                with Horizontal(classes="toolbar"):
+                    yield Button("✎ Edit", id="edit")
+                    yield Button("▶ Train", id="train", variant="success")
+                    yield Button("⟳ Fine-tune", id="finetune", variant="warning")
+                    yield Button("◉ Use", id="predict")
+                    yield Button("⇩ Export", id="export")
+                with VerticalScroll(id="details"):
+                    yield Static(WELCOME, id="details-text")
+        yield Footer()
+
+    def on_mount(self) -> None:
+        t = self.query_one("#models", DataTable)
+        t.add_columns("Name", "Task", "Layers", "Params", "Weights", "Epochs", "Modified")
+        self.refresh_models()
+
+    def on_resize(self, event) -> None:
+        # Give the model list the room on small terminals.
+        self.query_one("#banner").display = event.size.height >= 32 and event.size.width >= 60
+
+    def on_screen_resume(self) -> None:
+        self.refresh_models(keep=self.selected)
+
+    @property
+    def ws(self):
+        return self.app.ws
+
+    @property
+    def selected(self) -> str | None:
+        t = self.query_one("#models", DataTable)
+        if t.row_count == 0:
+            return None
+        return t.coordinate_to_cell_key(t.cursor_coordinate).row_key.value
+
+    def refresh_models(self, keep: str | None = None) -> None:
+        t = self.query_one("#models", DataTable)
+        t.clear()
+        rows = self.ws.list_models()
+        for r in rows:
+            t.add_row(r["name"], r["task"], str(r["layers"]), f"{r['params']:,}",
+                      "[green]trained[/]" if r["trained"] else "[dim]none[/]",
+                      str(r["epochs"] or "-"), r["modified"], key=r["name"])
+        names = [r["name"] for r in rows]
+        if keep in names:
+            t.move_cursor(row=names.index(keep))
+        self.show_details()
+
+    @on(DataTable.RowHighlighted, "#models")
+    def _highlight(self) -> None:
+        self.show_details()
+
+    @on(DataTable.RowSelected, "#models")
+    def _select(self) -> None:
+        self.action_edit()
+
+    def show_details(self) -> None:
+        box = self.query_one("#details-text", Static)
+        name = self.selected
+        if not name:
+            box.update(WELCOME)
+            return
+        spec = self.ws.load_spec(name)
+        text = [f"[b $accent]{name}[/]", "", model_io.summary_text(spec)]
+        hist = self.ws.load_history(name)
+        if hist:
+            text += ["", "[b]Training runs[/b]"]
+            for i, run in enumerate(hist[-8:], max(1, len(hist) - 7)):
+                last = run["epochs"][-1] if run.get("epochs") else {}
+                metric = (f"val acc {last['val_acc']:.1%}" if "val_acc" in last else
+                          f"val MAE {last['val_mae']:.4g}" if "val_mae" in last else "")
+                kind = run.get("kind", "train")
+                text.append(f" {i}. {run['started']}  {kind:<9} {len(run.get('epochs', []))} ep  "
+                            f"loss {last.get('val_loss', last.get('train_loss', 0)):.4f}  {metric}"
+                            f"  [dim]{run.get('dataset', '')}[/]")
+        elif not self.ws.has_weights(name):
+            text += ["", "[yellow]Not trained yet - press [b]t[/b] to train.[/]"]
+        box.update("\n".join(text))
+
+    # -- actions -----------------------------------------------------------
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        action = getattr(self, f"action_{event.button.id}", None)
+        if action:
+            action()
+
+    def _need_model(self) -> str | None:
+        name = self.selected
+        if not name:
+            self.notify("Create or import a model first.", severity="warning")
+        return name
+
+    def action_new(self) -> None:
+        def done(spec):
+            if spec:
+                from .builder import BuilderScreen
+
+                self.app.push_screen(BuilderScreen(spec, is_new=True))
+        self.app.push_screen(NewModelDialog(self.ws), done)
+
+    def action_edit(self) -> None:
+        if name := self._need_model():
+            from .builder import BuilderScreen
+
+            self.app.push_screen(BuilderScreen(self.ws.load_spec(name)))
+
+    def action_train(self) -> None:
+        if name := self._need_model():
+            from .train import TrainScreen
+
+            self.app.push_screen(TrainScreen(name, finetune=False))
+
+    def action_finetune(self) -> None:
+        if name := self._need_model():
+            if not self.ws.has_weights(name):
+                self.notify("This model has no trained weights yet - fine-tuning starts from random "
+                            "weights. Train it (or load weights) first for real transfer.",
+                            severity="warning", timeout=8)
+            from .train import TrainScreen
+
+            self.app.push_screen(TrainScreen(name, finetune=True))
+
+    def action_predict(self) -> None:
+        if name := self._need_model():
+            from .predict import PredictScreen
+
+            self.app.push_screen(PredictScreen(name))
+
+    def action_export(self) -> None:
+        if name := self._need_model():
+            from .export import ExportScreen
+
+            self.app.push_screen(ExportScreen(name))
+
+    def action_import(self) -> None:
+        def done(res):
+            if res:
+                self._do_import(res)
+        self.app.push_screen(ImportDialog(), done)
+
+    @work(thread=True, exclusive=True)
+    def _do_import(self, res: dict) -> None:
+        try:
+            name, msg = model_io.import_path(self.ws, res["path"], res["name"], res["shape"])
+        except Exception as e:  # noqa: BLE001
+            self.app.call_from_thread(self.notify, f"Import failed: {e}", severity="error", timeout=10)
+            return
+        self.app.call_from_thread(self.notify, msg, timeout=8)
+        self.app.call_from_thread(self.refresh_models, name)
+
+    def action_load_weights(self) -> None:
+        if not (name := self._need_model()):
+            return
+
+        def done(path):
+            if path:
+                try:
+                    self.notify(model_io.load_weights_into(self.ws, name, path))
+                except Exception as e:  # noqa: BLE001
+                    self.notify(f"Couldn't load weights: {e}", severity="error", timeout=10)
+                self.refresh_models(name)
+        self.app.push_screen(TextDialog(
+            f"Load weights into '{name}'", "Weights file (.pt / .pth / .safetensors)",
+            hint="Tensors are matched by layer position and shape; anything that doesn't fit is skipped."),
+            done)
+
+    def _name_check(self, v: str) -> str | None:
+        if not safe_name(v):
+            return "Enter a valid name"
+        if self.ws.exists(safe_name(v)):
+            return "That name is taken"
+        return None
+
+    def action_duplicate(self) -> None:
+        if not (name := self._need_model()):
+            return
+
+        def done(new):
+            if new:
+                self.ws.duplicate(name, safe_name(new))
+                self.refresh_models(safe_name(new))
+        self.app.push_screen(TextDialog("Duplicate model", "New name", self.ws.unique_name(name + "-copy"),
+                                        validate=self._name_check), done)
+
+    def action_rename(self) -> None:
+        if not (name := self._need_model()):
+            return
+
+        def done(new):
+            if new:
+                self.ws.rename(name, safe_name(new))
+                self.refresh_models(safe_name(new))
+        self.app.push_screen(TextDialog("Rename model", "New name", name, validate=self._name_check), done)
+
+    def action_delete(self) -> None:
+        if not (name := self._need_model()):
+            return
+
+        def done(ok):
+            if ok:
+                self.ws.delete(name)
+                self.notify(f"Deleted '{name}'")
+                self.refresh_models()
+        self.app.push_screen(ConfirmDialog("Delete model?", f"'{name}' and its weights and history will be "
+                                           "removed permanently.", "Delete"), done)
