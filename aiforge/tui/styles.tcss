@@ -1,0 +1,56 @@
+Screen { background: $background; }
+
+.section-title { text-style: bold; color: $accent; height: auto; margin: 1 0 0 0; }
+.hint { color: $text-muted; height: auto; margin-bottom: 1; }
+.error { color: $error; height: auto; }
+.toolbar { height: auto; margin: 1 0 0 0; }
+.toolbar Button { margin-right: 1; min-width: 8; }
+.spacer { width: 1fr; }
+.input-row { height: auto; }
+.input-row Input { width: 1fr; }
+.input-row Button { margin-left: 1; }
+
+/* Home ------------------------------------------------------------------- */
+#banner { margin: 1 0 0 0; border-bottom: hkey $panel; height: 9; }
+#library { width: 1fr; padding: 0 1; }
+#models { height: 1fr; }
+#details-pane { width: 72; padding: 0 1; border-left: tall $panel; }
+#details { height: 1fr; margin-top: 1; }
+#details-text { width: auto; }
+
+/* Builder ---------------------------------------------------------------- */
+#palette-pane { width: 24; padding: 0 1; border-right: tall $panel; }
+#palette { height: 1fr; }
+#palette-help { height: 6; color: $text-muted; padding-top: 1; }
+#stack-pane { width: 1fr; padding: 0 1; }
+#stack { height: 1fr; }
+#totals { height: auto; margin-top: 1; padding: 0 1; background: $boost; }
+#props { width: 36; padding: 0 1; border-left: tall $panel; }
+#props Label { margin-top: 1; }
+#layer-io { background: $boost; padding: 0 1; height: auto; margin-bottom: 1; }
+
+/* Train ------------------------------------------------------------------ */
+#train-config { width: 52; padding: 0 1; border-right: tall $panel; }
+#train-config Label { margin-top: 1; }
+#train-config .row { height: auto; }
+#train-config .row > Vertical { height: auto; width: 1fr; margin-right: 1; }
+#train-config .group { height: auto; }
+#train-config #load { margin-top: 1; width: 100%; }
+#train-config .switch-row { height: auto; margin-top: 1; }
+#train-config .switch-row Label { margin: 1 0 0 1; }
+#freeze { height: auto; max-height: 14; }
+#train-status { width: 1fr; padding: 0 1; }
+#data-info { height: auto; margin-top: 1; }
+#fit-row { height: auto; margin-top: 1; }
+#mismatch { width: 1fr; height: auto; }
+#epoch-label { width: 1fr; padding-top: 1; color: $text-muted; }
+#progress { margin: 1 0; }
+#charts { height: 12; }
+#charts LineChart { width: 1fr; height: 12; margin-right: 2; }
+#log { height: 1fr; border: round $panel; }
+
+/* Predict / Export --------------------------------------------------------- */
+#predict, #export { padding: 0 2; }
+#result { height: auto; margin: 1 0; padding: 1 2; background: $boost; min-height: 3; }
+#predict-log, #export-log { height: 1fr; border: round $panel; margin-top: 1; }
+#formats { height: auto; max-height: 12; }

@@ -1,0 +1,26 @@
+[project]
+name = "aiforge"
+version = "0.1.0"
+description = "No-code neural network studio in your terminal: build, train, fine-tune and export PyTorch models."
+requires-python = ">=3.10"
+dependencies = [
+    "torch>=2.2",
+    "torchvision>=0.17",
+    "textual>=1.0",
+    "safetensors>=0.4",
+    "onnx>=1.15",
+    "pillow",
+]
+
+[project.scripts]
+aiforge = "aiforge.__main__:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["aiforge*"]
+
+[tool.setuptools.package-data]
+"aiforge.tui" = ["*.tcss"]
