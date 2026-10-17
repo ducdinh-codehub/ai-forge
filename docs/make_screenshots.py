@@ -2,17 +2,38 @@
 
 Run from the project root:  .venv/bin/python docs/make_screenshots.py
 It drives the app through a real session (create, build, train, fine-tune, use, export)
-in a throw-away workspace and saves each screen as an SVG.
+in a throw-away workspace, captures each screen as SVG and converts it to PNG with headless
+Google Chrome (PNG, because PyPI can't display SVGs hosted on GitHub).
 """
 import asyncio, shutil, sys, tempfile, warnings
 warnings.filterwarnings("ignore")
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from aiforge import EXAMPLES_DIR
 from aiforge.tui.app import AIForgeApp
 from textual.widgets import DataTable, Input, Select, SelectionList, OptionList
 
 OUT = Path(__file__).resolve().parent / "images"
 OUT.mkdir(exist_ok=True)
+SVG_DIR = Path(tempfile.mkdtemp(prefix="aiforge-svg-"))
+CHROME = next((p for p in [
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    shutil.which("google-chrome") or "", shutil.which("chromium") or "", shutil.which("chrome") or "",
+] if p and Path(p).exists()), None)
+
+
+def svg_to_png(svg: Path, png: Path) -> None:
+    """Render an SVG at its natural size with headless Chrome."""
+    import math, re, subprocess
+
+    w, h = map(float, re.search(r'viewBox="0 0 ([\d.]+) ([\d.]+)"', svg.read_text()).groups())
+    w, h = math.ceil(w), math.ceil(h)
+    page = svg.with_suffix(".html")
+    page.write_text(f'<html><body style="margin:0;background:#000"><img src="{svg.as_uri()}" '
+                    f'style="display:block;width:{w}px;height:{h}px"></body></html>')
+    subprocess.run([CHROME, "--headless", "--disable-gpu", "--hide-scrollbars",
+                    "--force-device-scale-factor=1", f"--window-size={w},{h}",
+                    f"--screenshot={png}", page.as_uri()], check=True, capture_output=True)
 WS = Path(tempfile.mkdtemp(prefix="aiforge-shots-"))
 SIZE = (150, 44)
 
@@ -28,9 +49,13 @@ async def main():
         await pilot.pause(0.3)
         app.sub_title = "workspace: ./workspace"; await pilot.pause(0.3)
         def shot(name, title):
-            app.save_screenshot(str(OUT / f"{name}.svg"), )
-            # retitle the window chrome
-            p = OUT / f"{name}.svg"; p.write_text(p.read_text().replace(">AIForgeApp<", f">{title}<"))
+            svg = SVG_DIR / f"{name}.svg"
+            app.save_screenshot(str(svg))
+            svg.write_text(svg.read_text().replace(">AIForgeApp<", f">{title}<"))
+            if CHROME:
+                svg_to_png(svg, OUT / f"{name}.png")
+            else:
+                shutil.copy(svg, OUT / f"{name}.svg")
             print("saved", name)
         shot("01-home-empty", "AIForge – first launch")
 
@@ -82,8 +107,8 @@ async def main():
         s.query_one("#source", Select).value = "csv"; await pilot.pause(0.3)
         s.query_one("#browse-data").press(); await pilot.pause(0.5)
         fb = app.screen
-        fb.go(Path(__file__).resolve().parent.parent / "examples"); await pilot.pause(0.5)
-        fb._set_selected(Path(__file__).resolve().parent.parent / "examples" / "fruit_size.csv")
+        fb.go(EXAMPLES_DIR); await pilot.pause(0.5)
+        fb._set_selected(EXAMPLES_DIR / "fruit_size.csv")
         await pilot.pause(0.4)
         shot("15-file-browser", "AIForge – browsing for data")
         await pilot.press("escape"); await pilot.pause(0.3)
@@ -141,5 +166,8 @@ async def main():
         app.screen.query_one("#path", Input).value = "~/Downloads/my-model.aiforge.zip"; await pilot.pause()
         shot("11-import", "AIForge – import a model")
 
+if not CHROME:
+    print("Google Chrome not found - saving SVG screenshots instead of PNG.")
 asyncio.run(main())
 shutil.rmtree(WS, ignore_errors=True)
+shutil.rmtree(SVG_DIR, ignore_errors=True)

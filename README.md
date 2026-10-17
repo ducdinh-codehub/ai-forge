@@ -2,7 +2,7 @@
 
 **Build, train and use your own AI models in the terminal, without writing any code.**
 
-![AIForge model library](docs/images/10-home.svg)
+![AIForge model library](https://raw.githubusercontent.com/ducdinh-codehub/ai-forge/main/docs/images/10-home.png)
 
 AIForge is a program that runs in your terminal. You use it with the mouse or keyboard to:
 
@@ -54,55 +54,61 @@ examples.
 
 ## 2. Install
 
-Open a terminal and run the commands below one at a time.
+### Option A: install from PyPI (recommended)
 
-**Step 1: go to the project folder**
+**pipx** installs AIForge as a stand-alone app, separate from your other Python projects:
+
 ```bash
-cd path/to/AI-interact
+python3 -m pip install --user pipx    # one-time setup (Windows: py -m pip install --user pipx)
+python3 -m pipx ensurepath            # then close and reopen the terminal
+pipx install aiforge
 ```
 
-**Step 2: create a private Python environment** (keeps AIForge's packages separate from the rest of your computer)
+…or with plain **pip**, ideally inside a virtual environment:
+
 ```bash
+pip install aiforge
+```
+
+The first install downloads PyTorch (several hundred MB), so it can take a few minutes.
+On a PC with an NVIDIA graphics card, also run `pipx inject aiforge nvidia-ml-py` (or
+`pip install "aiforge[nvidia]"`) to see GPU usage while training.
+
+**Check it worked:**
+```bash
+aiforge --version
+```
+You should see `aiforge 0.1.0` (or newer).
+
+**Update to the newest version later:** `pipx upgrade aiforge` (or `pip install --upgrade aiforge`).
+
+### Option B: from the source code (for developers)
+
+```bash
+git clone https://github.com/ducdinh-codehub/ai-forge.git
+cd ai-forge
 python3 -m venv .venv
+.venv/bin/pip install -e .          # Windows: .venv\Scripts\pip install -e .
+.venv/bin/aiforge --version         # Windows: .venv\Scripts\aiforge --version
 ```
-
-**Step 3: install AIForge and its packages.** This downloads PyTorch, so it can take a few minutes.
-```bash
-# macOS / Linux
-.venv/bin/pip install -e .
-
-# Windows
-.venv\Scripts\pip install -e .
-```
-
-**Step 4: check it worked**
-```bash
-# macOS / Linux
-.venv/bin/aiforge --help
-
-# Windows
-.venv\Scripts\aiforge --help
-```
-You should see `usage: aiforge [-h] [-w WORKSPACE]`. If you do, the installation worked.
 
 ---
 
 ## 3. Start the app
 
 ```bash
-# macOS / Linux
-.venv/bin/aiforge
-
-# Windows
-.venv\Scripts\aiforge
+aiforge
 ```
 
-> **Tip:** if you run `source .venv/bin/activate` first (Windows: `.venv\Scripts\activate`),
-> you can just type `aiforge` from then on.
+> Installed from source? Use `.venv/bin/aiforge` (Windows: `.venv\Scripts\aiforge`), or run
+> `source .venv/bin/activate` first and then just `aiforge`.
+
+Your models are saved in the **`AIForge`** folder in your home folder (e.g.
+`/Users/you/AIForge` or `C:\Users\you\AIForge`). See [Where are my files?](#12-where-are-my-files).
 
 You will see the home screen:
 
-![First launch](docs/images/01-home-empty.svg)
+![First launch](https://raw.githubusercontent.com/ducdinh-codehub/ai-forge/main/docs/images/01-home-empty.png)
 
 **How to move around:**
 - **Click** buttons, list rows and input boxes with the mouse, *or*
@@ -123,7 +129,7 @@ points. The data is built into AIForge, so you don't need to download anything.
 
 Press **`n`** (or click **✚ New**).
 
-![Create a new model](docs/images/02-new-model.svg)
+![Create a new model](https://raw.githubusercontent.com/ducdinh-codehub/ai-forge/main/docs/images/02-new-model.png)
 
 1. Type a name, e.g. `spiral-classifier`
 2. Leave **Start from** on *MLP classifier (tabular)*
@@ -131,7 +137,7 @@ Press **`n`** (or click **✚ New**).
 
 ### Step 2: look at the model (builder screen)
 
-![Model builder](docs/images/03-builder.svg)
+![Model builder](https://raw.githubusercontent.com/ducdinh-codehub/ai-forge/main/docs/images/03-builder.png)
 
 The builder has three columns:
 
@@ -155,7 +161,7 @@ You don't need to change anything for this tutorial. Press **`Ctrl+S`** to save,
 > **What if I make a mistake?** The builder shows it immediately in red. For example, adding
 > an image layer (`Conv2d`) after a `Flatten` layer gives:
 >
-> ![The builder catches mistakes](docs/images/04-builder-error.svg)
+> ![The builder catches mistakes](https://raw.githubusercontent.com/ducdinh-codehub/ai-forge/main/docs/images/04-builder-error.png)
 >
 > Press **`Ctrl+Z`** to undo, or **`Del`** to remove the layer.
 
@@ -169,7 +175,7 @@ Make sure your model is selected in the list, then press **`t`** (or click **▶
 3. A yellow warning appears: the model was made for 10 inputs and 2 classes, but this data
    has 2 inputs and 3 classes.
 
-   ![Data loaded - auto-fit needed](docs/images/05-train-mismatch.svg)
+   ![Data loaded - auto-fit needed](https://raw.githubusercontent.com/ducdinh-codehub/ai-forge/main/docs/images/05-train-mismatch.png)
 
    Click **Auto-fit model to data**. AIForge adjusts the input and output layers for you.
 
@@ -188,7 +194,7 @@ Make sure your model is selected in the list, then press **`t`** (or click **▶
 
 Watch it learn:
 
-![Training](docs/images/06-train-done.svg)
+![Training](https://raw.githubusercontent.com/ducdinh-codehub/ai-forge/main/docs/images/06-train-done.png)
 
 - The **Loss** chart going **down** means the model is making fewer mistakes.
 - The **Accuracy** chart going **up** means it's getting more answers right.
@@ -201,7 +207,7 @@ Press **`Esc`** to go back.
 
 Press **`p`** (or click **◉ Use**). Type two numbers, e.g. `0.1, 0.45`, and press Enter:
 
-![Using the model](docs/images/08-predict.svg)
+![Using the model](https://raw.githubusercontent.com/ducdinh-codehub/ai-forge/main/docs/images/08-predict.png)
 
 The model answers **arm-0** and shows how confident it is in each class.
 
@@ -210,7 +216,7 @@ The model answers **arm-0** and shows how confident it is in each class.
 Press **`x`** (or click **⇩ Export**). Tick the formats you want with the **space bar** or
 mouse, then click **⇩ Export**:
 
-![Exporting](docs/images/09-export.svg)
+![Exporting](https://raw.githubusercontent.com/ducdinh-codehub/ai-forge/main/docs/images/09-export.png)
 
 Your files are now in `workspace/exports/spiral-classifier/`.
 
@@ -222,7 +228,7 @@ Your files are now in `workspace/exports/spiral-classifier/`.
 
 ### 5.1 Home: the model library
 
-![Model library](docs/images/10-home.svg)
+![Model library](https://raw.githubusercontent.com/ducdinh-codehub/ai-forge/main/docs/images/10-home.png)
 
 - **Left:** all your models. *Weights: trained* means it has been trained; *none* means it
   hasn't been trained yet.
@@ -279,7 +285,7 @@ The left side has two sections.
 
 **Choosing files:** click **📂 Browse** next to the path box instead of typing a path.
 
-![File browser](docs/images/15-file-browser.svg)
+![File browser](https://raw.githubusercontent.com/ducdinh-codehub/ai-forge/main/docs/images/15-file-browser.png)
 
 - **Left:** shortcuts to Home, Desktop, Downloads, Documents, the bundled **Examples**, your
   **Workspace** and the whole computer.
@@ -343,7 +349,7 @@ How to read it:
 **📖 Guide panel:** click **📖 Guide** (next to Start/Stop) or press **F1** to slide open a
 panel on the right. You can keep changing settings and training while it's open.
 
-![Guide panel while training](docs/images/16-train-guide.svg)
+![Guide panel while training](https://raw.githubusercontent.com/ducdinh-codehub/ai-forge/main/docs/images/16-train-guide.png)
 
 | Topic | What you'll read |
 |---|---|
@@ -370,7 +376,7 @@ lowest validation loss.
 Fine-tuning starts from a model that has **already learned something** and teaches it a new,
 related task. It's usually faster and needs less data than training from scratch.
 
-![Fine-tuning](docs/images/07-finetune.svg)
+![Fine-tuning](https://raw.githubusercontent.com/ducdinh-codehub/ai-forge/main/docs/images/07-finetune.png)
 
 It works like Train, plus a **③ Fine-tuning** section:
 
@@ -413,7 +419,7 @@ What you type depends on the model:
 
 Press **`i`** on the home screen and enter a file path.
 
-![Import](docs/images/11-import.svg)
+![Import](https://raw.githubusercontent.com/ducdinh-codehub/ai-forge/main/docs/images/11-import.png)
 
 | You have | What happens |
 |---|---|
@@ -436,7 +442,7 @@ are two ways to open the explanations.
 Press **`Ctrl+E`** (or click **Explain** at the top of the right panel). It explains the
 selected layer **using your model's real numbers**:
 
-![Explain tab](docs/images/12-builder-explain.svg)
+![Explain tab](https://raw.githubusercontent.com/ducdinh-codehub/ai-forge/main/docs/images/12-builder-explain.png)
 
 - what the layer does, in one sentence
 - what it does **in your model**, e.g. *"combines all 10 values into 64 new values"*
@@ -454,14 +460,14 @@ A full-screen reader with three parts:
    what each layer does to the data, where the parameters are, how the model learns, and a
    **design review** that points out common mistakes.
 
-   ![Model guide](docs/images/13-guide-overview.svg)
+   ![Model guide](https://raw.githubusercontent.com/ducdinh-codehub/ai-forge/main/docs/images/13-guide-overview.png)
 
 2. **Each layer of your model**: the real numbers for that layer, followed by the full
    article about that layer type.
 3. **Layer encyclopedia**: an article for every layer AIForge offers, with how it works, a
    diagram, each setting explained, when to use it, and tips.
 
-   ![Layer encyclopedia](docs/images/14-guide-encyclopedia.svg)
+   ![Layer encyclopedia](https://raw.githubusercontent.com/ducdinh-codehub/ai-forge/main/docs/images/14-guide-encyclopedia.png)
 
 Use **↑ / ↓** to pick a topic and **→** (or Enter) to scroll the text. **`Esc`** goes back.
 
@@ -481,8 +487,8 @@ Use **↑ / ↓** to pick a topic and **→** (or Enter) to scroll the text. **`
 
 ## 6. Using your own data
 
-Small sample files are in the [`examples/`](examples) folder, so you can try each format
-right away.
+Small sample files are in the [`examples/`](https://github.com/ducdinh-codehub/ai-forge/tree/main/aiforge/examples) folder, so you can try each format right away. They're
+installed together with AIForge: in any **📂 Browse** window, click **📦 Examples** to open them.
 
 ### 6.1 A table (CSV): predict a category or a number
 
@@ -502,8 +508,8 @@ size,weight,color,label
   **regression** (predicting a number). Otherwise it's **classification** (predicting a
   category). You can override this with the **Task** setting.
 
-Examples: [`fruit_size.csv`](examples/fruit_size.csv) (classification) and
-[`house_prices.csv`](examples/house_prices.csv) (regression; choose `price` as the target).
+Examples: [`fruit_size.csv`](https://github.com/ducdinh-codehub/ai-forge/blob/main/aiforge/examples/fruit_size.csv) (classification) and
+[`house_prices.csv`](https://github.com/ducdinh-codehub/ai-forge/blob/main/aiforge/examples/house_prices.csv) (regression; choose `price` as the target).
 
 ### 6.2 Text (CSV): classify sentences
 
@@ -516,7 +522,7 @@ text,sentiment
 ```
 
 Use the template **Text Transformer classifier** or **Text classifier (Embedding + LSTM)**.
-Example: [`movie_reviews.csv`](examples/movie_reviews.csv).
+Example: [`movie_reviews.csv`](https://github.com/ducdinh-codehub/ai-forge/blob/main/aiforge/examples/movie_reviews.csv).
 
 ### 6.3 Images: classify pictures
 
@@ -533,7 +539,7 @@ my_photos/
 ```
 
 Images are resized to the model's input size automatically (set it on the builder's
-**Input** row, e.g. `3,64,64`). Example: [`color_images/`](examples/color_images).
+**Input** row, e.g. `3,64,64`). Example: [`color_images/`](https://github.com/ducdinh-codehub/ai-forge/tree/main/aiforge/examples/color_images).
 
 > **How much data do I need?** For images, aim for at least 50–100 per class. With fewer
 > images, use the **Transfer learning (ResNet18)** template, which starts from a model that
@@ -627,7 +633,8 @@ You can change any template after creating it.
 
 | Problem | Solution |
 |---|---|
-| `command not found: aiforge` | Use the full path, `.venv/bin/aiforge`, or activate the environment first: `source .venv/bin/activate` |
+| `command not found: aiforge` | Installed with pipx: run `python3 -m pipx ensurepath`, then close and reopen the terminal. Installed from source: use `.venv/bin/aiforge`, or activate the environment first with `source .venv/bin/activate` |
+| My old models are missing after updating | Earlier versions saved models in `./workspace`. Start AIForge from the folder that contains it, or run `aiforge -w path/to/workspace` |
 | `python3: command not found` | Install Python from [python.org](https://www.python.org/downloads/) (Windows: try `py` instead of `python3`) |
 | The screen looks cut off or squashed | Make the terminal window bigger (at least 120×35) or full screen. The banner hides itself on small windows. |
 | Strange symbols instead of boxes and lines | Use a modern terminal (iTerm2, Windows Terminal) and a font such as *Cascadia Code*, *JetBrains Mono* or *Fira Code* |
@@ -648,10 +655,18 @@ You can change any template after creating it.
 
 ## 12. Where are my files?
 
-Everything lives in the `workspace/` folder (change it with `aiforge -w /another/folder`):
+Everything lives in one **workspace** folder:
+
+| How you run AIForge | Workspace folder |
+|---|---|
+| Normally (`aiforge`) | **`AIForge` in your home folder**, e.g. `/Users/you/AIForge` or `C:\Users\you\AIForge` |
+| From a folder that already contains a `workspace/` folder with models | that `./workspace` folder (this is how earlier versions stored models) |
+| `aiforge -w /another/folder`, or with the `AIFORGE_WORKSPACE` environment variable set | the folder you chose |
+
+The folder looks like this:
 
 ```
-workspace/
+AIForge/
 ├── models/
 │   └── spiral-classifier/
 │       ├── spec.json       ← the model's structure (layers, classes, preprocessing)
@@ -682,9 +697,13 @@ aiforge/
 └── tui/             the terminal interface (Textual): home, builder, train, predict, export, guide,
                      browser (file/folder picker with previews), sysmon (the "This computer" panel)
 docs/
-├── images/              README screenshots
+├── images/              README screenshots (PNG)
 └── make_screenshots.py  regenerates them: .venv/bin/python docs/make_screenshots.py
-examples/            small sample datasets
+aiforge/examples/    small sample datasets (shipped with the package)
 ```
 
+**Publishing a new version to PyPI:** bump `__version__` in `aiforge/__init__.py`, then
+`python -m build` and `twine upload dist/*`.
+
 Built with [PyTorch](https://pytorch.org) and [Textual](https://textual.textualize.io).
+Released under the [MIT License](https://github.com/ducdinh-codehub/ai-forge/blob/main/LICENSE).
