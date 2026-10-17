@@ -1,5 +1,5 @@
 [project]
-name = "aiforge"
+name = "aiforge-studio"
 dynamic = ["version"]
 description = "No-code neural network studio in your terminal: build, train, fine-tune and export PyTorch models."
 readme = "README.md"

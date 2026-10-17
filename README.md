@@ -61,26 +61,27 @@ examples.
 ```bash
 python3 -m pip install --user pipx    # one-time setup (Windows: py -m pip install --user pipx)
 python3 -m pipx ensurepath            # then close and reopen the terminal
-pipx install aiforge
+pipx install aiforge-studio
 ```
 
 …or with plain **pip**, ideally inside a virtual environment:
 
 ```bash
-pip install aiforge
+pip install aiforge-studio
 ```
 
 The first install downloads PyTorch (several hundred MB), so it can take a few minutes.
-On a PC with an NVIDIA graphics card, also run `pipx inject aiforge nvidia-ml-py` (or
-`pip install "aiforge[nvidia]"`) to see GPU usage while training.
+On a PC with an NVIDIA graphics card, also run `pipx inject aiforge-studio nvidia-ml-py` (or
+`pip install "aiforge-studio[nvidia]"`) to see GPU usage while training.
 
 **Check it worked:**
 ```bash
 aiforge --version
 ```
-You should see `aiforge 0.1.0` (or newer).
+You should see `aiforge 0.1.0` (or newer). The package is called **aiforge-studio**, but the
+command you type is just **`aiforge`**.
 
-**Update to the newest version later:** `pipx upgrade aiforge` (or `pip install --upgrade aiforge`).
+**Update to the newest version later:** `pipx upgrade aiforge-studio` (or `pip install --upgrade aiforge-studio`).
 
 ### Option B: from the source code (for developers)
 
