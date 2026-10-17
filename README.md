@@ -1,5 +1,20 @@
 # AIForge
 
+<p align="center">
+  <a href="https://www.python.org/downloads/"><img alt="python 3.10+" src="https://img.shields.io/badge/python-3.10%2B-3776AB?style=flat"></a>
+  <a href="https://pytorch.org"><img alt="PyTorch 2.5+" src="https://img.shields.io/badge/PyTorch-2.5%2B-EE4C2C?style=flat"></a>
+  <a href="https://textual.textualize.io"><img alt="Textual 8.0+" src="https://img.shields.io/badge/Textual-8.0%2B-7B2CBF?style=flat"></a>
+  <a href="https://onnx.ai"><img alt="ONNX export" src="https://img.shields.io/badge/ONNX-export-E8A0BF?style=flat"></a>
+  <br>
+  <a href="https://pypi.org/project/aiforge-studio/"><img alt="pypi package" src="https://img.shields.io/pypi/v/aiforge-studio?label=pypi%20package&color=4c1&style=flat"></a>
+  <a href="https://pepy.tech/project/aiforge-studio"><img alt="downloads" src="https://img.shields.io/pepy/dt/aiforge-studio?label=downloads&color=0e75b6&style=flat"></a>
+  <img alt="AI Powered" src="https://img.shields.io/badge/AI-Powered-ff69b4?style=flat">
+  <a href="https://github.com/ducdinh-codehub/ai-forge/blob/main/LICENSE"><img alt="license MIT" src="https://img.shields.io/badge/license-MIT-D4A72C?style=flat"></a>
+  <br>
+  <img alt="status alpha" src="https://img.shields.io/badge/status-alpha-E05D44?style=flat">
+  <a href="https://github.com/ducdinh-codehub/ai-forge/commits/main"><img alt="development active" src="https://img.shields.io/badge/development-active-44CC11?style=flat"></a>
+</p>
+
 **Build, train and use your own AI models in the terminal, without writing any code.**
 
 ![AIForge model library](https://raw.githubusercontent.com/ducdinh-codehub/ai-forge/main/docs/images/10-home.png)
