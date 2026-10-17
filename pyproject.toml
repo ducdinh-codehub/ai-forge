@@ -1,30 +1,60 @@
 [project]
 name = "aiforge"
-version = "0.1.0"
+dynamic = ["version"]
 description = "No-code neural network studio in your terminal: build, train, fine-tune and export PyTorch models."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Duc Dinh", email = "dinhduc4work@gmail.com" }]
 requires-python = ">=3.10"
+keywords = ["no-code", "deep-learning", "neural-network", "pytorch", "tui", "terminal",
+            "machine-learning", "model-builder", "training", "onnx"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Education",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Education",
+]
 dependencies = [
-    "torch>=2.2",
-    "torchvision>=0.17",
-    "textual>=1.0",
+    "torch>=2.5",
+    "torchvision>=0.20",
+    "textual>=8.0",
     "safetensors>=0.4",
     "onnx>=1.15",
-    "pillow",
+    "pillow>=10",
     "psutil>=5.9",
 ]
 
 [project.optional-dependencies]
 nvidia = ["nvidia-ml-py>=12"]  # GPU utilisation / temperature on NVIDIA cards
 
+[project.urls]
+Homepage = "https://github.com/ducdinh-codehub/ai-forge"
+Source = "https://github.com/ducdinh-codehub/ai-forge"
+Issues = "https://github.com/ducdinh-codehub/ai-forge/issues"
+
 [project.scripts]
 aiforge = "aiforge.__main__:main"
 
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools.dynamic]
+version = { attr = "aiforge.__version__" }
 
 [tool.setuptools.packages.find]
 include = ["aiforge*"]
 
 [tool.setuptools.package-data]
 "aiforge.tui" = ["*.tcss"]
+"aiforge" = ["examples/*.csv", "examples/**/*.png"]

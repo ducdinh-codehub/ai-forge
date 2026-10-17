@@ -18,9 +18,8 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, DirectoryTree, Input, Label, OptionList, Static, Switch
 from textual.widgets.option_list import Option
 
+from .. import EXAMPLES_DIR
 from ..data import IMAGE_EXT
-
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 # Ready-made filters for the places that ask for a path.
 CSV_EXT = {".csv", ".tsv", ".txt"}
@@ -136,7 +135,7 @@ class FileBrowser(ModalScreen[str | None]):
         home = Path.home()
         places = [("🏠 Home", home), ("🖥  Desktop", home / "Desktop"),
                   ("⬇  Downloads", home / "Downloads"), ("📄 Documents", home / "Documents"),
-                  ("📦 Examples", PROJECT_ROOT / "examples"), ("📁 Current folder", Path.cwd())]
+                  ("📦 Examples", EXAMPLES_DIR), ("📁 Current folder", Path.cwd())]
         try:
             places.append(("🧠 Workspace", self.app.ws.root))
         except Exception:  # noqa: BLE001 - no app workspace (e.g. tests)
