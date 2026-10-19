@@ -148,7 +148,8 @@ Press **`n`** (or click **✚ New**).
 ![Create a new model](https://raw.githubusercontent.com/ducdinh-codehub/ai-forge/main/docs/images/02-new-model.png)
 
 1. Type a name, e.g. `spiral-classifier`
-2. Leave **Start from** on *MLP classifier (tabular)*
+2. Leave **Model type** on *Tabular data (CSV)* and **Start from** on *MLP classifier (tabular)*
+   (other types: *Computer vision*, *Language / NLP*, or *Build manually* for an empty model)
 3. Click **Create & open builder**
 
 ### Step 2: look at the model (builder screen)
@@ -577,7 +578,9 @@ Images are resized to the model's input size automatically (set it on the builde
 | Sentences, simpler / faster | Text classifier (Embedding + LSTM) | ~1.4M parameters |
 | You want to design everything yourself | Blank | — |
 
-You can change any template after creating it.
+In the **Create a new model** dialog, first pick a **Model type** (Tabular, Computer vision,
+Language / NLP, or *Build manually*), then a template of that type. You can change any
+template after creating it.
 
 ---
 

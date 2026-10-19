@@ -7,7 +7,7 @@ from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Label, Select, Static
 
-from ..spec import TEMPLATES, from_template, safe_name
+from ..spec import MANUAL, MODEL_TYPES, TEMPLATES, from_template, safe_name
 
 
 def browse_into(screen, target: Input, **kwargs) -> None:
@@ -152,21 +152,41 @@ class NewModelDialog(Dialog):
             yield Static("Pick a starting point - you can change every layer afterwards.", classes="hint")
             yield Label("Model name")
             yield Input(self.ws.unique_name("my-model"), id="name")
-            yield Label("Start from")
-            yield Select([(t, t) for t in TEMPLATES], value="MLP classifier (tabular)",
-                         allow_blank=False, id="template")
+            yield Label("Model type")
+            yield Select([(t, t) for t in MODEL_TYPES], value=next(iter(MODEL_TYPES)),
+                         allow_blank=False, id="type")
+            yield Label("Start from", id="template-label")
+            yield Select([], allow_blank=True, id="template")
             yield Static("", id="preview", classes="hint")
             yield Static("", id="error", classes="error")
             yield self.buttons("Create & open builder")
 
     def on_mount(self) -> None:
-        self._preview()
+        self._fill_templates()
 
     def on_select_changed(self, event: Select.Changed) -> None:
+        if event.select.id == "type":
+            self._fill_templates()
+        else:
+            self._preview()
+
+    def _fill_templates(self) -> None:
+        kind = self.query_one("#type", Select).value
+        names = MODEL_TYPES[kind]
+        template = self.query_one("#template", Select)
+        template.set_options([(t, t) for t in names])
+        template.value = names[0]
+        manual = kind == MANUAL
+        template.display = not manual
+        self.query_one("#template-label", Label).display = not manual
         self._preview()
 
+    def _template(self) -> str:
+        value = self.query_one("#template", Select).value
+        return value if value in TEMPLATES else MODEL_TYPES[self.query_one("#type", Select).value][0]
+
     def _preview(self) -> None:
-        spec = from_template(self.query_one("#template", Select).value, "x")
+        spec = from_template(self._template(), "x")
         layers = " → ".join(l.type for l in spec.layers) or "(empty - add layers yourself)"
         self.query_one("#preview", Static).update(
             f"Input {tuple(spec.input_shape)} → {layers}\n{spec.total_params():,} parameters")
@@ -177,7 +197,7 @@ class NewModelDialog(Dialog):
             return self.error("Please enter a name (letters, numbers, - _ .)")
         if self.ws.exists(name):
             return self.error(f"A model named '{name}' already exists")
-        self.dismiss(from_template(self.query_one("#template", Select).value, name))
+        self.dismiss(from_template(self._template(), name))
 
 
 class ImportDialog(Dialog):
