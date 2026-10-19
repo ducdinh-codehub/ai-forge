@@ -451,8 +451,8 @@ Press **`i`** on the home screen and enter a file path.
 
 ### 5.8 Guide: learn what each layer does
 
-New to neural networks? AIForge explains every part of your model in plain language. There
-are two ways to open the explanations.
+New to machine learning? Open the Guide and start with **🎓 ML basics**. AIForge also explains
+every part of your model in plain language. There are two ways to open the explanations.
 
 **A. The Explain tab (inside the builder)**
 
@@ -471,7 +471,7 @@ whole model and a quick design review. Press `Ctrl+E` again to return to Setting
 
 **B. The full Guide (`?` in the builder, `g` or 📖 Guide on the home screen)**
 
-A full-screen reader with three parts:
+A full-screen reader with four parts:
 
 1. **Overview & review**: the whole model explained step by step. It covers what goes in,
    what each layer does to the data, where the parameters are, how the model learns, and a
@@ -481,7 +481,16 @@ A full-screen reader with three parts:
 
 2. **Each layer of your model**: the real numbers for that layer, followed by the full
    article about that layer type.
-3. **Layer encyclopedia**: an article for every layer AIForge offers, with how it works, a
+3. **🎓 ML basics and 🧭 Model types**: short lessons for students and beginners, with
+   everyday examples and no maths:
+   - *ML basics*: what machine learning is, data and labels, classification vs.
+     regression, how a model learns (loss, epochs, learning rate), overfitting and
+     underfitting, and a step-by-step first project
+   - *Model types*: which type to choose, then one lesson each for **Tabular**,
+     **Computer vision** (CNNs, transfer learning, Vision Transformers), **Language / NLP**
+     (tokens, embeddings, RNNs, Transformers, BERT vs. GPT, and how this relates to LLMs like
+     ChatGPT) and **Build manually**, each listing its templates and when to pick them
+4. **Layer encyclopedia**: an article for every layer AIForge offers, with how it works, a
    diagram, each setting explained, when to use it, and tips.
 
    ![Layer encyclopedia](https://raw.githubusercontent.com/ducdinh-codehub/ai-forge/main/docs/images/14-guide-encyclopedia.png)
