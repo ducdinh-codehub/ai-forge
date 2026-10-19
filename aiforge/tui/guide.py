@@ -21,10 +21,11 @@ class GuideScreen(Screen):
                 Binding("left,h", "focus_nav", "Topics", show=False),
                 Binding("right,l", "focus_text", "Read", show=False)]
 
-    def __init__(self, spec: ModelSpec, focus: str = "overview"):
+    def __init__(self, spec: ModelSpec | None = None, focus: str = "overview"):
+        """Without a spec (no model yet) only the lessons and the encyclopedia are shown."""
         super().__init__()
         self.spec = spec
-        self.start = focus  # "overview", "layer:<index>", "type:<LayerType>" or "learn:<lesson>"
+        self.start = focus if spec is not None else "learn:what"  # "overview", "layer:<index>", "type:<LayerType>" or "learn:<lesson>"
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -37,14 +38,17 @@ class GuideScreen(Screen):
         yield Footer()
 
     def _options(self) -> list:
-        opts: list = [Option(f"[b]This model: {self.spec.name}[/b]", disabled=True),
-                      Option(" Overview & review", id="overview")]
-        for i, layer in enumerate(self.spec.layers):
-            opts.append(Option(f" {i + 1:>2}. {layer.type}", id=f"layer:{i}"))
+        opts: list = []
+        if self.spec is not None:
+            opts += [Option(f"[b]This model: {self.spec.name}[/b]", disabled=True),
+                     Option(" Overview & review", id="overview")]
+            opts += [Option(f" {i + 1:>2}. {layer.type}", id=f"layer:{i}")
+                     for i, layer in enumerate(self.spec.layers)]
+            opts.append(None)
         for title, keys in (("🎓 ML basics", BASICS), ("🧭 Model types", TYPES)):
-            opts += [None, Option(f"[b]{title}[/b]", disabled=True)]
-            opts += [Option(f" {LESSONS[k][0]}", id=k) for k in keys]
-        opts += [None, Option("[b]Layer encyclopedia[/b]", disabled=True)]
+            opts += [Option(f"[b]{title}[/b]", disabled=True)]
+            opts += [Option(f" {LESSONS[k][0]}", id=k) for k in keys] + [None]
+        opts.append(Option("[b]Layer encyclopedia[/b]", disabled=True))
         for cat, items in by_category().items():
             if items:
                 opts.append(Option(f"[dim]{cat}[/dim]", disabled=True))
