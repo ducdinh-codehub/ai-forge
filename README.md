@@ -568,14 +568,27 @@ Images are resized to the model's input size automatically (set it on the builde
 
 | Your data | Template | Size |
 |---|---|---|
+| **📊 Tabular data (CSV)** | | |
 | A table of numbers/categories, predicting a **category** | MLP classifier (tabular) | tiny |
 | A table, predicting a **number** (price, temperature…) | MLP regressor (tabular) | tiny |
+| **🖼 Computer vision (images)** | | |
 | Small grayscale images (28×28, e.g. digits) | Small CNN | ~200K parameters |
 | Small colour images (32×32) | CNN (CIFAR-10) | ~67K parameters |
+| Your own photo folder, trained from scratch | Deep CNN (64×64 colour photos) | ~240K parameters |
 | Photos, especially with **few** examples | Transfer learning (ResNet18) | ~11M parameters |
-| Images, to try a modern architecture | Vision Transformer (ViT) | ~546K parameters |
+| Photos, on a laptop or for mobile apps | Transfer learning (MobileNetV3, fast) | ~930K parameters |
+| Photos, when accuracy matters most | Transfer learning (EfficientNet-B0, accurate) | ~4M parameters |
+| Images, to try a modern architecture | Vision Transformer (ViT, 32×32 colour) | ~546K parameters |
+| Grayscale images with a Transformer | Vision Transformer (ViT, 28×28 grayscale) | ~105K parameters |
+| Colour images, CNN features + attention | Hybrid CNN + Transformer (32×32 colour) | ~300K parameters |
+| **💬 Language / NLP (text)** | | |
 | Sentences / reviews | Text Transformer classifier | ~2.8M parameters |
+| Longer or harder texts, bigger encoder (like BERT) | BERT-style Transformer (deeper encoder) | ~7.3M parameters |
+| Reading left-to-right like GPT (causal attention) | GPT-style Transformer (causal attention) | ~3.4M parameters |
 | Sentences, simpler / faster | Text classifier (Embedding + LSTM) | ~1.4M parameters |
+| Sentences, reading both directions | Text classifier (bidirectional GRU) | ~1.4M parameters |
+| A quick baseline that trains in seconds | Bag of words (Embedding + average, fastest) | ~1.3M parameters |
+| **✎ Build manually** | | |
 | You want to design everything yourself | Blank | — |
 
 In the **Create a new model** dialog, first pick a **Model type** (Tabular, Computer vision,

@@ -359,6 +359,58 @@ TEMPLATES: dict[str, dict] = {
         layers=lambda: [_L("Embedding", num_embeddings=20000, embedding_dim=64),
                         _L("LSTM", hidden_size=128), _L("Dropout", p=0.2),
                         _L("Linear", out_features=2)]),
+    # --- more computer vision ---
+    "Deep CNN (64×64 colour photos)": dict(
+        input_shape=[3, 64, 64],
+        layers=lambda: [_L("Conv2d", out_channels=32), _L("BatchNorm"), _L("ReLU"), _L("MaxPool2d"),
+                        _L("Conv2d", out_channels=64), _L("BatchNorm"), _L("ReLU"), _L("MaxPool2d"),
+                        _L("Conv2d", out_channels=128), _L("BatchNorm"), _L("ReLU"), _L("MaxPool2d"),
+                        _L("Conv2d", out_channels=128), _L("BatchNorm"), _L("ReLU"),
+                        _L("GlobalAvgPool"), _L("Dropout", p=0.3), _L("Linear", out_features=2)]),
+    "Transfer learning (MobileNetV3, fast)": dict(
+        input_shape=[3, 224, 224],
+        layers=lambda: [_L("PretrainedBackbone", arch="mobilenet_v3_small"), _L("Dropout", p=0.2),
+                        _L("Linear", out_features=2)]),
+    "Transfer learning (EfficientNet-B0, accurate)": dict(
+        input_shape=[3, 224, 224],
+        layers=lambda: [_L("PretrainedBackbone", arch="efficientnet_b0"), _L("Dropout", p=0.3),
+                        _L("Linear", out_features=2)]),
+    "Vision Transformer (ViT, 28×28 grayscale)": dict(
+        input_shape=[1, 28, 28],
+        layers=lambda: [_L("PatchEmbedding", patch_size=4, embed_dim=64), _L("PositionalEncoding"),
+                        _L("TransformerEncoder", num_layers=3, num_heads=4, ff_dim=128),
+                        _L("SequencePool"), _L("Linear", out_features=10)]),
+    "Hybrid CNN + Transformer (32×32 colour)": dict(
+        input_shape=[3, 32, 32],
+        # the convs find local features; PatchEmbedding with patch_size 1 turns each 8×8 cell into a token
+        layers=lambda: [_L("Conv2d", out_channels=32), _L("BatchNorm"), _L("ReLU"), _L("MaxPool2d"),
+                        _L("Conv2d", out_channels=64), _L("BatchNorm"), _L("ReLU"), _L("MaxPool2d"),
+                        _L("PatchEmbedding", patch_size=1, embed_dim=128), _L("PositionalEncoding"),
+                        _L("TransformerEncoder", num_layers=2, num_heads=4, ff_dim=256),
+                        _L("SequencePool"), _L("Linear", out_features=10)]),
+    # --- more language / NLP ---
+    "Bag of words (Embedding + average, fastest)": dict(
+        input_shape=[128], input_dtype="long",
+        layers=lambda: [_L("Embedding", num_embeddings=20000, embedding_dim=64), _L("SequencePool"),
+                        _L("Dropout", p=0.2), _L("Linear", out_features=2)]),
+    "Text classifier (bidirectional GRU)": dict(
+        input_shape=[100], input_dtype="long",
+        layers=lambda: [_L("Embedding", num_embeddings=20000, embedding_dim=64),
+                        _L("GRU", hidden_size=128, bidirectional=True), _L("Dropout", p=0.2),
+                        _L("Linear", out_features=2)]),
+    "BERT-style Transformer (deeper encoder)": dict(
+        input_shape=[128], input_dtype="long",
+        layers=lambda: [_L("Embedding", num_embeddings=20000, embedding_dim=256),
+                        _L("PositionalEncoding"), _L("LayerNorm"),
+                        _L("TransformerEncoder", num_layers=4, num_heads=8, ff_dim=512),
+                        _L("SequencePool"), _L("Dropout", p=0.1), _L("Linear", out_features=2)]),
+    "GPT-style Transformer (causal attention)": dict(
+        input_shape=[128], input_dtype="long",
+        # causal: each word only sees earlier words, so the last position has read the whole text
+        layers=lambda: [_L("Embedding", num_embeddings=20000, embedding_dim=128),
+                        _L("PositionalEncoding"),
+                        _L("TransformerEncoder", num_layers=4, num_heads=4, ff_dim=512, causal=True),
+                        _L("SequencePool", mode="last"), _L("Linear", out_features=2)]),
 }
 
 
@@ -368,10 +420,19 @@ MODEL_TYPES: dict[str, list[str]] = {
     "📊 Tabular data (CSV)": ["MLP classifier (tabular)", "MLP regressor (tabular)"],
     "🖼 Computer vision (images)": ["Small CNN (28×28 grayscale, e.g. MNIST)",
                                    "CNN (32×32 colour, e.g. CIFAR-10)",
+                                   "Deep CNN (64×64 colour photos)",
                                    "Transfer learning (ResNet18 backbone)",
-                                   "Vision Transformer (ViT, 32×32 colour)"],
+                                   "Transfer learning (MobileNetV3, fast)",
+                                   "Transfer learning (EfficientNet-B0, accurate)",
+                                   "Vision Transformer (ViT, 32×32 colour)",
+                                   "Vision Transformer (ViT, 28×28 grayscale)",
+                                   "Hybrid CNN + Transformer (32×32 colour)"],
     "💬 Language / NLP (text, LLM-style Transformer)": ["Text Transformer classifier",
-                                                        "Text classifier (Embedding + LSTM)"],
+                                                        "BERT-style Transformer (deeper encoder)",
+                                                        "GPT-style Transformer (causal attention)",
+                                                        "Text classifier (Embedding + LSTM)",
+                                                        "Text classifier (bidirectional GRU)",
+                                                        "Bag of words (Embedding + average, fastest)"],
     MANUAL: ["Blank"],
 }
 
