@@ -298,7 +298,7 @@ class TrainScreen(Screen):
         if cfg["source"] in ("csv", "csv_text", "image_folder") and not cfg["path"]:
             self.notify("Enter a path first.", severity="error")
             return
-        self.query_one("#data-info", Static).update("[yellow]Loading data…[/] "
+        self.query_one("#data-info", Static).update("[$warning]Loading data…[/] "
                                                      "(built-in datasets download on first use)")
         self.query_one("#load", Button).disabled = True
         self._load_data(cfg)
@@ -341,7 +341,7 @@ class TrainScreen(Screen):
         self.query_one("#autofit", Button).display = bool(probs)
         self.query_one("#fixmodel", Button).display = bool(problems) and not probs
         self.query_one("#mismatch", Static).update(
-            "[yellow]⚠ " + "\n⚠ ".join(probs or problems) + "[/]")
+            "[$warning]⚠ " + "\n⚠ ".join(probs or problems) + "[/]")
 
     @on(Button.Pressed, "#autofit")
     def _autofit(self) -> None:

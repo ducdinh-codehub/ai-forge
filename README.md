@@ -648,7 +648,8 @@ template after creating it.
 
 ## 10. Keyboard shortcuts
 
-**Everywhere:** `Esc` back · `Tab` next box · `Enter` confirm · `Ctrl+Q` quit · `Ctrl+P` command palette
+**Everywhere:** `Esc` back · `Tab` next box · `Enter` confirm · `Ctrl+T` light / dark theme · `Ctrl+Q` quit ·
+`Ctrl+P` command palette (its **Theme** command offers more colour themes)
 
 | Home | | Builder | | Train / Fine-tune | |
 |---|---|---|---|---|---|
@@ -714,7 +715,7 @@ AIForge/
 │       ├── spec.json       ← the model's structure (layers, classes, preprocessing)
 │       ├── weights.pt      ← what the model learned
 │       └── history.json    ← every training run
-├── settings.json           ← your preferences (e.g. the Guide panel size)
+├── settings.json           ← your preferences (e.g. the colour theme, the Guide panel size)
 ├── exports/                ← files created by Export
 └── data/                   ← downloaded datasets (MNIST, CIFAR-10…)
 ```

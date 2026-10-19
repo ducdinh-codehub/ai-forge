@@ -156,7 +156,7 @@ class BuilderScreen(Screen):
         self.query_one("#totals", Static).update(
             f"[b]Total parameters: {total:,}[/b]   trainable {total - frozen:,}   "
             f"size {total * 4 / 1024 ** 2:.2f} MB (fp32)   output {_shape(out)}\n{status}")
-        dirty = "  [yellow]● unsaved[/]" if self.dirty else ""
+        dirty = "  [$warning]● unsaved[/]" if self.dirty else ""
         self.query_one("#stack-title", Static).update(
             f"Model [b]{self.spec.name}[/b] · {self.spec.task} · {len(self.spec.layers)} layers{dirty}")
 

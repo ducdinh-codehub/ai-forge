@@ -141,7 +141,7 @@ class HomeScreen(Screen):
                             f"loss {last.get('val_loss', last.get('train_loss', 0)):.4f}  {metric}"
                             f"  [dim]{run.get('dataset', '')}[/]")
         elif not self.ws.has_weights(name):
-            text += ["", "[yellow]Not trained yet - press [b]t[/b] to train.[/]"]
+            text += ["", "[$warning]Not trained yet - press [b]t[/b] to train.[/]"]
         box.update("\n".join(text))
 
     # -- actions -----------------------------------------------------------

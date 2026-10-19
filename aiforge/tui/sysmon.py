@@ -38,7 +38,8 @@ class SystemPanel(Widget):
     """Renders specs once and gauges every time ``update_sample`` is called."""
 
     DEFAULT_CSS = """
-    SystemPanel { height: 8; border: round $panel; padding: 0 1; margin-top: 1; }
+    SystemPanel { height: 8; border: round $panel; border-title-color: $text-muted; padding: 0 1;
+                  margin-top: 1; }
     """
 
     def __init__(self, **kw):
