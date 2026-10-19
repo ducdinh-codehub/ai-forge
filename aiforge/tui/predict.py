@@ -51,10 +51,10 @@ class PredictScreen(Screen):
             + (f" · {len(self.spec.class_names)} classes" if self.spec.class_names else ""))
         if not ws.has_weights(self.model_name):
             self.query_one("#predict-warn", Static).update(
-                "[yellow]⚠ This model has not been trained - predictions are random.[/]")
+                "[$warning]⚠ This model has not been trained - predictions are random.[/]")
         if not self.spec.data.get("preprocess"):
             self.query_one("#predict-warn", Static).update(
-                "[yellow]⚠ No preprocessing info saved (model wasn't trained here) - "
+                "[$warning]⚠ No preprocessing info saved (model wasn't trained here) - "
                 "inputs are used as-is.[/]")
         self.query_one("#hint", Label).update(f"Input: {input_hint(self.spec)}")
         self.is_image = self.spec.data.get("preprocess", {}).get("type") == "image" or \
@@ -78,7 +78,7 @@ class PredictScreen(Screen):
             lines = [f"[b]→ {res[0][0]}[/b]  ({res[0][1]:.1%} confident)", ""]
             for label, p in res:
                 bar = "█" * round(p * BAR)
-                lines.append(f"  {label[:20]:<20} [cyan]{bar:<{BAR}}[/] {p:6.1%}")
+                lines.append(f"  {label[:20]:<20} [$primary]{bar:<{BAR}}[/] {p:6.1%}")
             box.update("\n".join(lines))
         else:
             box.update("\n".join(f"[b]{label}: {v:.6g}[/b]" for label, v in res))

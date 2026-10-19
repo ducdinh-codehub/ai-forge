@@ -4,6 +4,8 @@ from __future__ import annotations
 from rich.text import Text
 from textual.widget import Widget
 
+from .colors import tone
+
 # Braille dots give 2×4 sub-cell resolution per character.
 _DOTS = ((0x01, 0x08), (0x02, 0x10), (0x04, 0x20), (0x40, 0x80))
 
@@ -63,7 +65,8 @@ class LineChart(Widget):
             for c in range(cols):
                 if grid[r][c]:
                     o = owner[r][c]
-                    out.append(chr(0x2800 + grid[r][c]), style=self.palette[o] if o < 2 else "white")
+                    style = self.palette[o] if o < 2 else tone(self, "foreground")  # 2 = lines overlap
+                    out.append(chr(0x2800 + grid[r][c]), style=style)
                 else:
                     out.append(" ")
             if r < rows - 1:

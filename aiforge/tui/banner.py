@@ -6,6 +6,8 @@ from rich.style import Style
 from rich.text import Text
 from textual.widget import Widget
 
+from .colors import is_dark
+
 LOGO = [
     " █████╗ ██╗███████╗ ██████╗ ██████╗  ██████╗ ███████╗",
     "██╔══██╗██║██╔════╝██╔═══██╗██╔══██╗██╔════╝ ██╔════╝",
@@ -50,6 +52,7 @@ class Banner(Widget):
         self.refresh()
 
     def render(self) -> Text:
+        shade = 1.0 if is_dark(self) else 0.75  # darker colours stay readable on a light background
         width = len(LOGO[0])
         pad = " " * max(0, (self.size.width - width) // 2)
         out = Text()
@@ -60,7 +63,7 @@ class Banner(Widget):
                     out.append(" ")
                     continue
                 # Diagonal sweep: colour depends on column and row.
-                r, g, b = _gradient(col / (width * 1.6) + row * 0.02 + self.phase)
+                r, g, b = (round(c * shade) for c in _gradient(col / (width * 1.6) + row * 0.02 + self.phase))
                 if ch != "█":  # the box-drawing "shadow" is drawn dimmer
                     r, g, b = (round(c * 0.45) for c in (r, g, b))
                 out.append(ch, Style(color=Color.from_rgb(r, g, b), bold=ch == "█"))
@@ -68,6 +71,6 @@ class Banner(Widget):
         tag_pad = " " * max(0, (self.size.width - len(TAGLINE)) // 2)
         out.append(tag_pad)
         for i, ch in enumerate(TAGLINE):
-            r, g, b = _gradient(i / (len(TAGLINE) * 1.6) + self.phase + 0.15)
+            r, g, b = (round(c * shade) for c in _gradient(i / (len(TAGLINE) * 1.6) + self.phase + 0.15))
             out.append(ch, Style(color=Color.from_rgb(r, g, b), italic=True))
         return out
