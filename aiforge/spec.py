@@ -362,6 +362,20 @@ TEMPLATES: dict[str, dict] = {
 }
 
 
+# Model types shown first in the "new model" dialog; each lists its templates, best first.
+MANUAL = "✎ Build manually (blank)"
+MODEL_TYPES: dict[str, list[str]] = {
+    "📊 Tabular data (CSV)": ["MLP classifier (tabular)", "MLP regressor (tabular)"],
+    "🖼 Computer vision (images)": ["Small CNN (28×28 grayscale, e.g. MNIST)",
+                                   "CNN (32×32 colour, e.g. CIFAR-10)",
+                                   "Transfer learning (ResNet18 backbone)",
+                                   "Vision Transformer (ViT, 32×32 colour)"],
+    "💬 Language / NLP (text, LLM-style Transformer)": ["Text Transformer classifier",
+                                                        "Text classifier (Embedding + LSTM)"],
+    MANUAL: ["Blank"],
+}
+
+
 def from_template(template: str, name: str) -> ModelSpec:
     t = TEMPLATES[template]
     return ModelSpec(name=name, input_shape=list(t["input_shape"]),
