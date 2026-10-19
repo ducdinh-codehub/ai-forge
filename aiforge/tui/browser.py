@@ -248,7 +248,7 @@ class FileBrowser(ModalScreen[str | None]):
     def _accept(self) -> None:
         reason = self._acceptable(self.selected)
         if reason:
-            self._status(f"[yellow]{reason}[/]")
+            self._status(f"[$warning]{reason}[/]")
             return
         self.dismiss(str(self.selected))
 
@@ -313,11 +313,11 @@ def _preview_dir(p: Path) -> str:
         top = max(n for _, n in classes)
         for name, n in classes[:12]:
             bar = "█" * max(1, round(n / top * 14))
-            lines.append(f" {name[:14]:<14} [cyan]{bar}[/] {n:,}")
+            lines.append(f" {name[:14]:<14} [$primary]{bar}[/] {n:,}")
         if len(classes) > 12:
             lines.append(f" [dim]… {len(classes) - 12} more classes[/]")
         if min(n for _, n in classes) < 20:
-            lines += ["", "[yellow]Some classes have < 20 images - consider the "
+            lines += ["", "[$warning]Some classes have < 20 images - consider the "
                           "Transfer learning template.[/]"]
         return "\n".join(lines)
     imgs = [f for f in files if f.suffix.lower() in IMAGE_EXT]
@@ -351,13 +351,13 @@ def _preview_csv(p: Path) -> str:
                 rows.append(row)
             n += 1
     if not rows:
-        return "[yellow]Empty file[/]"
+        return "[$warning]Empty file[/]"
     header, data = rows[0], rows[1:]
     lines = [f"[green]{n - 1:,} rows · {len(header)} columns[/]", "", "[b]Columns[/b]"]
     for i, h in enumerate(header[:14]):
         vals = [r[i] for r in data if i < len(r) and r[i].strip()]
         numeric = vals and all(_is_num(v) for v in vals)
-        kind = "[cyan]number[/]" if numeric else "[magenta]text[/]"
+        kind = "[$primary]number[/]" if numeric else "[$accent]text[/]"
         lines.append(f" {h[:22]:<22} {kind}")
     if len(header) > 14:
         lines.append(f" [dim]… {len(header) - 14} more[/]")
@@ -402,7 +402,7 @@ def _preview_zip(p: Path) -> str:
         if "spec.json" in names:
             spec = json.loads(z.read("spec.json"))
             lines = ["[green]✓ AIForge model bundle[/]", ""] + _spec_lines(spec) + \
-                    ["", "weights: " + ("[green]yes[/]" if "weights.pt" in names else "[yellow]no[/]")]
+                    ["", "weights: " + ("[green]yes[/]" if "weights.pt" in names else "[$warning]no[/]")]
         else:
             lines += [f" · {n}" for n in names[:15]]
     return "\n".join(lines)
@@ -445,4 +445,4 @@ def _preview_weights(p: Path) -> str:
             lines += [""] + [f" · {k}" for k in keys[:12]]
         return "\n".join(lines)
     return ("PyTorch file (weights or a saved model).\n\n"
-            "[yellow]Only open .pt files you trust - they can run code when loaded.[/]")
+            "[$warning]Only open .pt files you trust - they can run code when loaded.[/]")

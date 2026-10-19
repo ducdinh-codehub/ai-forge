@@ -39,7 +39,7 @@ class ExportScreen(Screen):
     def on_mount(self) -> None:
         if not self.app.ws.has_weights(self.model_name):
             self.query_one("#export-warn", Static).update(
-                "[yellow]⚠ Not trained yet - exported weights will be random. "
+                "[$warning]⚠ Not trained yet - exported weights will be random. "
                 "Structure exports are still useful.[/]")
         problems = self.app.ws.load_spec(self.model_name).validate()
         if any("Layer" in p for p in problems):
