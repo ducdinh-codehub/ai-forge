@@ -471,7 +471,8 @@ whole model and a quick design review. Press `Ctrl+E` again to return to Setting
 
 **B. The full Guide (`?` in the builder, `g` or 📖 Guide on the home screen)**
 
-A full-screen reader with four parts:
+A full-screen reader with four parts. It opens even before you have created a model: then it
+starts at the first lesson and shows only the lessons and the encyclopedia.
 
 1. **Overview & review**: the whole model explained step by step. It covers what goes in,
    what each layer does to the data, where the parameters are, how the model learns, and a
