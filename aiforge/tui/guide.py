@@ -1,4 +1,5 @@
-"""Full-screen model guide: walk-through of the model, each of its layers, and an encyclopedia."""
+"""Full-screen guide: walk-through of the model, each of its layers, beginner lessons and an
+encyclopedia."""
 from __future__ import annotations
 
 from textual import on
@@ -11,6 +12,7 @@ from textual.widgets.option_list import Option
 
 from ..guide import encyclopedia_markdown, layer_markdown, model_markdown
 from ..layers import by_category
+from ..learn import BASICS, LESSONS, TYPES, lesson_markdown
 from ..spec import ModelSpec
 
 
@@ -22,7 +24,7 @@ class GuideScreen(Screen):
     def __init__(self, spec: ModelSpec, focus: str = "overview"):
         super().__init__()
         self.spec = spec
-        self.start = focus  # "overview", "layer:<index>" or "type:<LayerType>"
+        self.start = focus  # "overview", "layer:<index>", "type:<LayerType>" or "learn:<lesson>"
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -39,6 +41,9 @@ class GuideScreen(Screen):
                       Option(" Overview & review", id="overview")]
         for i, layer in enumerate(self.spec.layers):
             opts.append(Option(f" {i + 1:>2}. {layer.type}", id=f"layer:{i}"))
+        for title, keys in (("🎓 ML basics", BASICS), ("🧭 Model types", TYPES)):
+            opts += [None, Option(f"[b]{title}[/b]", disabled=True)]
+            opts += [Option(f" {LESSONS[k][0]}", id=k) for k in keys]
         opts += [None, Option("[b]Layer encyclopedia[/b]", disabled=True)]
         for cat, items in by_category().items():
             if items:
@@ -63,6 +68,8 @@ class GuideScreen(Screen):
             text = model_markdown(self.spec)
         elif key.startswith("layer:"):
             text = layer_markdown(self.spec, int(key.split(":")[1]))
+        elif key.startswith("learn:"):
+            text = lesson_markdown(key)
         elif key.startswith("type:"):
             text = encyclopedia_markdown(key.split(":")[1])
         else:
