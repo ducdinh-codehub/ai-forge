@@ -22,12 +22,12 @@ Build, train and share neural networks - no code needed.
  [reverse] f [/reverse] [b]Fine-tune[/b]  adapt a trained model to new data
  [reverse] p [/reverse] [b]Use[/b]        get predictions from the model
  [reverse] x [/reverse] [b]Export[/b]     save it as .pt, .safetensors, ONNX, …
- [reverse] g [/reverse] [b]Guide[/b]      learn what every layer of a model does
+ [reverse] g [/reverse] [b]Guide[/b]      learn ML basics, model types and every layer
 
 Already have a model? Press [reverse] i [/reverse] to import it.
 
-[dim]New here? Press [b]n[/b], keep the default template, then press
-[b]t[/b] and train on the built-in "spirals" toy data.[/dim]"""
+[dim]New here? Press [b]g[/b] to read the beginner lessons, or press [b]n[/b], keep the
+default template, then press [b]t[/b] and train on the built-in "spirals" toy data.[/dim]"""
 
 
 class HomeScreen(Screen):
@@ -200,10 +200,10 @@ class HomeScreen(Screen):
             self.app.push_screen(ExportScreen(name))
 
     def action_guide(self) -> None:
-        if name := self._need_model():
-            from .guide import GuideScreen
+        from .guide import GuideScreen
 
-            self.app.push_screen(GuideScreen(self.ws.load_spec(name)))
+        name = self.selected  # the lessons and encyclopedia work without a model
+        self.app.push_screen(GuideScreen(self.ws.load_spec(name) if name else None))
 
     def action_import(self) -> None:
         def done(res):
