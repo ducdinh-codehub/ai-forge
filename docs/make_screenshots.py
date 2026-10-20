@@ -1,7 +1,8 @@
 """Regenerate the README screenshots in docs/images/.
 
 Run from the project root:  .venv/bin/python docs/make_screenshots.py
-It drives the app through a real session (create, build, train, fine-tune, use, export)
+It drives the app through a real session (create, build, train, fine-tune, use, export,
+download a dataset - this step needs internet)
 in a throw-away workspace, captures each screen as SVG and converts it to PNG with headless
 Google Chrome (PNG, because PyPI can't display SVGs hosted on GitHub).
 """
@@ -90,6 +91,7 @@ async def main():
         # Builder error example (CNN template with a misplaced layer) -- separate model
         await pilot.press("n"); await pilot.pause()
         app.screen.query_one("#name", Input).value = "digit-reader"
+        app.screen.query_one("#type", Select).value = "🖼 Computer vision (images)"; await pilot.pause(0.3)
         app.screen.query_one("#template", Select).value = "Small CNN (28×28 grayscale, e.g. MNIST)"
         app.screen.submit(); await pilot.pause(0.6)
         b = app.screen; t = b.query_one("#stack", DataTable)
@@ -162,6 +164,30 @@ async def main():
         # Home with models
         home.query_one("#models", DataTable).move_cursor(row=1); await pilot.pause(0.5)
         shot("10-home", "AIForge – model library")
+
+        # Dataset hub (needs internet): a downloaded dataset, then a download in progress
+        await pilot.press("s"); await pilot.pause(0.5)
+        hub = app.screen
+        hub_list = hub.query_one("#hub-list", OptionList)
+
+        def pick(key):
+            hub_list.highlighted = next(i for i in range(hub_list.option_count)
+                                        if hub_list.get_option_at_index(i).id == key)
+        pick("iris"); await pilot.pause(0.3)
+        hub._start_download()
+        await wait_for(pilot, lambda: hub.downloading is None); await pilot.pause(0.5)
+        md = hub.query_one("#hub-text")  # show the throw-away workspace as ./workspace
+        md.update(md.source.replace(str(WS), "./workspace")); await pilot.pause(0.5)
+        shot("17-datasets", "AIForge – download famous datasets")
+        pick("imdb"); await pilot.pause(0.3)
+        hub._start_download()
+        await wait_for(pilot, lambda: "MB /" in str(hub.query_one("#hub-status").render()))
+        await pilot.pause(3)
+        shot("18-datasets-download", "AIForge – downloading a dataset")
+        hub._cancel = True
+        await wait_for(pilot, lambda: hub.downloading is None)
+        await pilot.press("escape"); await pilot.pause(0.3)
+
         await pilot.press("i"); await pilot.pause(0.3)
         app.screen.query_one("#path", Input).value = "~/Downloads/my-model.aiforge.zip"; await pilot.pause()
         shot("11-import", "AIForge – import a model")

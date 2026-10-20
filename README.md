@@ -179,6 +179,8 @@ model with a design review, and an encyclopedia of every layer.
 Press `s` on the home screen (or **🗄 Get a famous dataset…** on the Train screen). Pick one,
 press **⇩ Download**, then **▶ Train on it**. AIForge fills in all the fields and loads it.
 
+![Dataset hub](https://raw.githubusercontent.com/ducdinh-codehub/ai-forge/main/docs/images/17-datasets.png)
+
 | Model type | Datasets |
 |---|---|
 | 📊 Tabular | Iris · Wine · Breast cancer · Adult income · Red wine quality · California housing |
@@ -186,7 +188,10 @@ press **⇩ Download**, then **▶ Train on it**. AIForge fills in all the field
 | 💬 Text | SMS Spam · SST-2 · IMDB reviews · AG News |
 
 All come from their official sources (UCI, Stanford, Oxford, U. Toronto, Zalando, fast.ai).
-Each one shows its publisher, license, size and the templates that suit it.
+Each one shows its publisher, license, size and the templates that suit it. Downloads show
+their progress and can be cancelled:
+
+![Downloading a dataset](https://raw.githubusercontent.com/ducdinh-codehub/ai-forge/main/docs/images/18-datasets-download.png)
 
 ### Option B: your own files
 
