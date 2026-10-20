@@ -112,7 +112,7 @@ and a key (see [shortcuts](#7-keyboard-shortcuts)).
 |---|---|
 | Add a layer | `a`, highlight a layer, `Enter` |
 | Edit a layer | Select it, change the boxes on the right |
-| Change input size / type / task | Select the **Input** row |
+| Change the input (1D / 2D / 3D), type or task | Select the **Input** row, pick **Input dimensions**, fill in each size (e.g. 3D image: Channels `3`, Height `64`, Width `64`) |
 | Move · copy · remove a layer | `Shift+↑/↓` · `Ctrl+D` · `Del` |
 | Undo · save | `Ctrl+Z` · `Ctrl+S` |
 | Learn what a layer does | `Ctrl+E` (Explain tab) or `?` (full Guide) |

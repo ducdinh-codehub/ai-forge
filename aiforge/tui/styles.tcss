@@ -32,6 +32,9 @@ Screen { background: $background; }
 #explain-scroll { padding: 0 1; }
 #explain { margin: 0; }
 #props Label { margin-top: 1; }
+#m-dims { height: auto; }
+#m-dims > Vertical { width: 1fr; height: auto; }
+#m-dims Label { color: $text-muted; }
 #layer-io { background: $boost; padding: 0 1; height: auto; margin-bottom: 1; }
 
 /* Train ------------------------------------------------------------------ */
