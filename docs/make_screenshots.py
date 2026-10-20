@@ -150,6 +150,15 @@ async def main():
         shot("08-predict", "AIForge – using a trained model")
         await pilot.press("escape"); await pilot.pause()
 
+        # Evaluate
+        home.query_one("#models", DataTable).move_cursor(row=1); await pilot.pause()
+        await pilot.press("v"); await pilot.pause(0.6)
+        s = app.screen
+        await pilot.press("ctrl+r")
+        await wait_for(pilot, lambda: s.report is not None); await pilot.pause(0.8)
+        shot("19-evaluate", "AIForge – evaluating a model")
+        await pilot.press("escape"); await pilot.pause()
+
         # Export
         await pilot.press("x"); await pilot.pause(0.6)
         s = app.screen

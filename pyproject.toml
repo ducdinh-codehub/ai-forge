@@ -31,6 +31,7 @@ classifiers = [
 ]
 dependencies = [
     "torch>=2.5",
+    "numpy>=1.24",
     "torchvision>=0.20",
     "textual>=8.0",
     "safetensors>=0.4",
