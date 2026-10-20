@@ -20,6 +20,27 @@ from .modals import SaveChangesDialog
 
 BAR = 8
 
+# Input dimensions offered in Model settings: (label, name of each dimension, default shape)
+RANKS = {
+    1: ("1D · values (tables, text)", ["Values"], [10]),
+    2: ("2D · grid (length×features)", ["Length", "Features"], [28, 28]),
+    3: ("3D · image (channels×H×W)", ["Channels", "Height", "Width"], [3, 32, 32]),
+}
+
+
+def reshape_input(shape: list[int], rank: int, dtype: str) -> list[int]:
+    """A sensible input shape after switching to ``rank`` dimensions, reusing what fits."""
+    shape = list(shape)
+    if rank == len(shape):
+        return shape
+    if rank == 1:  # flatten: 1×28×28 -> 784, like a Flatten layer would
+        return [128] if dtype == "long" else [max(1, int(torch.tensor(shape).prod()))]
+    if rank == 2:
+        return shape[1:] if len(shape) == 3 else list(RANKS[2][2])
+    if rank == 3 and len(shape) == 2:  # add a channel: 28×28 -> 1×28×28
+        return [1, *shape]
+    return list(RANKS[rank][2])
+
 
 def _shape(s) -> str:
     return "×".join(str(d) for d in s) if s else "-"
@@ -252,8 +273,12 @@ class BuilderScreen(Screen):
             Static("These describe what goes in and what comes out. Training's "
                    "'Auto-fit' can set them from your dataset.", classes="hint"),
             Label("Name"), Input(s.name, id="m-name"),
-            Label("Input shape  [dim]e.g. 10 · 1,28,28 · 3,224,224[/]"),
-            Input(",".join(map(str, s.input_shape)), id="m-shape"),
+            Label("Input dimensions"),
+            Select(self._rank_options(), value=len(s.input_shape), allow_blank=False, id="m-rank"),
+            Horizontal(*[Vertical(Label(name), Input(str(d), id=f"m-dim-{i}", type="integer"))
+                         for i, (name, d) in enumerate(zip(self._dim_names(), s.input_shape))],
+                       id="m-dims"),
+            Static(f"[dim]Input shape: {_shape(s.input_shape)}[/]", id="m-shape-text"),
             Label("Input type"),
             Select([("float - numbers / images", "float"), ("long - token ids (text)", "long")],
                    value=s.input_dtype, allow_blank=False, id="m-dtype"),
@@ -264,6 +289,17 @@ class BuilderScreen(Screen):
             Input(", ".join(s.class_names), id="m-classes"),
             Static("", id="prop-error", classes="error"),
         ]
+
+    def _rank_options(self) -> list:
+        opts = [(label, r) for r, (label, _, _) in RANKS.items()]
+        n = len(self.spec.input_shape)
+        return opts if n in RANKS else opts + [(f"{n}D · custom", n)]
+
+    def _dim_names(self) -> list[str]:
+        n = len(self.spec.input_shape)
+        if n == 1 and self.spec.input_dtype == "long":
+            return ["Sequence length (tokens)"]
+        return RANKS[n][1] if n in RANKS else [f"Dim {i + 1}" for i in range(n)]
 
     def _prop_error(self, msg: str) -> None:
         for w in self.query("#prop-error"):
@@ -306,11 +342,16 @@ class BuilderScreen(Screen):
                 if not name:
                     raise ValueError("Name can't be empty")
                 new = {"name": name}
-            elif wid == "m-shape":
-                dims = [int(v) for v in str(raw).replace("x", ",").replace("×", ",").split(",") if v.strip()]
-                if not dims or any(d <= 0 for d in dims):
-                    raise ValueError("Shape must be positive integers, e.g. 3,32,32")
-                new = {"input_shape": dims}
+            elif wid == "m-rank":
+                rank = int(raw)
+                new = {"input_shape": reshape_input(s.input_shape, rank, s.input_dtype)}
+                if rank == 3:
+                    new["input_dtype"] = "float"  # images are numbers, never token ids
+            elif wid.startswith("m-dim-"):
+                i, d = int(wid.rsplit("-", 1)[1]), int(raw)
+                if d <= 0:
+                    raise ValueError("Each dimension must be a positive whole number")
+                new = {"input_shape": [d if j == i else v for j, v in enumerate(s.input_shape)]}
             elif wid == "m-dtype":
                 new = {"input_dtype": raw}
             elif wid == "m-task":
@@ -321,7 +362,7 @@ class BuilderScreen(Screen):
                 return
         except ValueError as e:
             return self._prop_error(str(e) if "invalid literal" not in str(e) else
-                                    "Shape must be integers, e.g. 3,32,32")
+                                    "Each dimension must be a whole number")
         if all(getattr(s, k) == v for k, v in new.items()):
             return self._prop_error("")
         self._push_undo()
@@ -329,6 +370,11 @@ class BuilderScreen(Screen):
             setattr(s, k, v)
         self._prop_error("")
         self.refresh_stack()
+        if wid in ("m-rank", "m-dtype"):
+            self.show_props()  # different boxes for the new number of dimensions
+        else:
+            for w in self.query("#m-shape-text"):
+                w.update(f"[dim]Input shape: {_shape(s.input_shape)}[/]")
 
     @on(Input.Changed)
     def _input_changed(self, event: Input.Changed) -> None:
