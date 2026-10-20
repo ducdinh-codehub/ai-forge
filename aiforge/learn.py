@@ -469,8 +469,9 @@ MANUAL_LESSON = """\
 
 ## How to build a model from scratch
 
-1. **Set the input shape** to match your data: `(10,)` for 10 table columns,
-   `(3, 32, 32)` for small colour images, `(128,)` for text of 128 words.
+1. **Set the input** to match your data: select the **Input** row, pick **Input dimensions**
+   and fill in each size. **1D** `10` for 10 table columns or `128` for text of 128 words,
+   **3D** Channels `3` × Height `32` × Width `32` for small colour images.
 2. **Add layers** from the list. AIForge shows the shape after every layer and warns you
    immediately if two layers don't fit together.
 3. **End with a Linear layer** whose outputs = number of classes (or numbers to predict).
