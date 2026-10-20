@@ -24,8 +24,9 @@ With the mouse or keyboard you can:
 1. **Design** a neural network by picking layers from a list
 2. **Train** it on a CSV table, text, images, or a famous public dataset
 3. **Fine-tune** a trained model for a new, related task
-4. **Use** it to make predictions
-5. **Export** it for Python, ONNX Runtime, mobile apps and more
+4. **Evaluate** how good it really is
+5. **Use** it to make predictions
+6. **Export** it for Python, ONNX Runtime, mobile apps and more
 
 No PyTorch or Python knowledge needed. The built-in **Guide** (`g`) teaches the ML basics.
 
@@ -152,6 +153,25 @@ reset the output layer, and save under a **new name** so the original stays safe
 
 Give it a whole CSV or image folder for **batch prediction** (writes a CSV with predictions).
 
+### Evaluate: how good is it really?
+Press `v` (📊 **Evaluate**), choose the data (the validation / test data from training, or a
+separate file or folder with the true answers) and click **▶ Evaluate** (`Ctrl+R`). The report:
+
+| Section | What it shows |
+|---|---|
+| **Verdict + warnings** | Strong / Good / Weak / Not useful, plus e.g. "classes are imbalanced: accuracy is misleading" |
+| **Metrics vs. a baseline** | Classification: accuracy, balanced accuracy, F1, ROC-AUC, PR-AUC, log loss, calibration. Regression: MAE, RMSE, MSE, R², MAPE. With 95% confidence intervals. |
+| **Per class · confusion matrix · calibration** | Which classes it gets wrong, mixes up, or is over-confident about |
+| **Error analysis** | Its worst mistakes, with the actual example (row values, text or file name) |
+| **Slices** | Results per group of each category column in a table (fairness check) |
+| **Robustness · learning curves** | Score with noisy inputs; over- or underfitting from the training history |
+| **Compare with another model** | Which of two models is better, with a significance test |
+
+![Evaluate](https://raw.githubusercontent.com/ducdinh-codehub/ai-forge/main/docs/images/19-evaluate.png)
+
+**💾 Save report** writes it to `exports/<model>/` as Markdown and JSON. The home screen shows
+the last result. New to the metrics? Press `g` → **7. Is my model good?**
+
 ### Export
 | Format | Use it to… |
 |---|---|
@@ -251,6 +271,7 @@ New to the words (epoch, loss, overfitting…)? Press `g` → **🎓 ML basics**
 | `t` | Train | `Shift+↑/↓` | Move layer | `Esc` | Back |
 | `f` | Fine-tune | `Ctrl+D` | Duplicate layer | | |
 | `p` | Use | `Ctrl+Z` | Undo | | |
+| `v` | Evaluate | | | | |
 | `x` | Export | `Ctrl+S` | Save | | |
 | `s` | Datasets | `Ctrl+E` | Explain tab | | |
 | `g` | Guide | `?` | Full guide | | |
@@ -283,8 +304,8 @@ exists, or `aiforge -w <folder>` / `AIFORGE_WORKSPACE`).
 
 ```
 AIForge/
-├── models/<name>/     spec.json (structure) · weights.pt · history.json
-├── exports/           files created by Export
+├── models/<name>/     spec.json (structure) · weights.pt · history.json · evaluations.json
+├── exports/           files created by Export and saved evaluation reports
 ├── data/              downloaded datasets (data/hub/ for the dataset hub)
 └── settings.json      your preferences
 ```
@@ -301,6 +322,7 @@ aiforge/
 ├── hub.py        dataset hub: catalog of trusted datasets, download + conversion
 ├── trainer.py    training / fine-tuning loop
 ├── predict.py    single and batch predictions
+├── evaluate.py   metrics, baseline, calibration, error analysis, slices, significance tests
 ├── model_io.py   export and import
 ├── guide.py      layer encyclopedia, model walk-through, design review
 ├── learn.py      beginner lessons

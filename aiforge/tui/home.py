@@ -21,6 +21,7 @@ Build, train and share neural networks - no code needed.
  [reverse] t [/reverse] [b]Train[/b]      teach the model with your data
  [reverse] f [/reverse] [b]Fine-tune[/b]  adapt a trained model to new data
  [reverse] p [/reverse] [b]Use[/b]        get predictions from the model
+ [reverse] v [/reverse] [b]Evaluate[/b]   measure how good it really is (metrics, mistakes…)
  [reverse] x [/reverse] [b]Export[/b]     save it as .pt, .safetensors, ONNX, …
  [reverse] g [/reverse] [b]Guide[/b]      learn ML basics, model types and every layer
  [reverse] s [/reverse] [b]Datasets[/b]   download famous, trusted datasets to train on
@@ -39,6 +40,7 @@ class HomeScreen(Screen):
         Binding("t", "train", "Train"),
         Binding("f", "finetune", "Fine-tune"),
         Binding("p", "predict", "Use"),
+        Binding("v", "evaluate", "Evaluate"),
         Binding("x", "export", "Export"),
         Binding("g,question_mark", "guide", "Guide"),
         Binding("s", "datasets", "Datasets"),
@@ -72,6 +74,7 @@ class HomeScreen(Screen):
                     yield Button("▶ Train", id="train", variant="success")
                     yield Button("⟳ Fine-tune", id="finetune", variant="warning")
                     yield Button("◉ Use", id="predict")
+                    yield Button("📊 Evaluate", id="evaluate")
                     yield Button("⇩ Export", id="export")
                     yield Button("📖 Guide", id="guide")
                 with VerticalScroll(id="details"):
@@ -145,7 +148,20 @@ class HomeScreen(Screen):
                             f"  [dim]{run.get('dataset', '')}[/]")
         elif not self.ws.has_weights(name):
             text += ["", "[yellow]Not trained yet - press [b]t[/b] to train.[/]"]
+        if evals := self._evaluations(name):
+            h = evals[-1]
+            score = (f"accuracy {h['accuracy']:.1%} · macro F1 {h['macro_f1']:.3f}" if "accuracy" in h
+                     else f"MAE {h['mae']:.4g}" + (f" · R² {h['r2']:.3f}" if h.get("r2") is not None else ""))
+            text += ["", "[b]Last evaluation[/b]", f" {h['date']}  {score}  [dim]{h['data']}[/]"]
         box.update("\n".join(text))
+
+    def _evaluations(self, name: str) -> list[dict]:
+        import json
+
+        try:
+            return json.loads((self.ws.model_dir(name) / "evaluations.json").read_text())
+        except (OSError, ValueError):
+            return []
 
     # -- actions -----------------------------------------------------------
 
@@ -195,6 +211,12 @@ class HomeScreen(Screen):
             from .predict import PredictScreen
 
             self.app.push_screen(PredictScreen(name))
+
+    def action_evaluate(self) -> None:
+        if name := self._need_model():
+            from .evaluate import EvaluateScreen
+
+            self.app.push_screen(EvaluateScreen(name))
 
     def action_export(self) -> None:
         if name := self._need_model():
