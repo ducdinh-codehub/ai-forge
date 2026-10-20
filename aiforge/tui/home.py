@@ -23,6 +23,7 @@ Build, train and share neural networks - no code needed.
  [reverse] p [/reverse] [b]Use[/b]        get predictions from the model
  [reverse] x [/reverse] [b]Export[/b]     save it as .pt, .safetensors, ONNX, …
  [reverse] g [/reverse] [b]Guide[/b]      learn ML basics, model types and every layer
+ [reverse] s [/reverse] [b]Datasets[/b]   download famous, trusted datasets to train on
 
 Already have a model? Press [reverse] i [/reverse] to import it.
 
@@ -40,6 +41,7 @@ class HomeScreen(Screen):
         Binding("p", "predict", "Use"),
         Binding("x", "export", "Export"),
         Binding("g,question_mark", "guide", "Guide"),
+        Binding("s", "datasets", "Datasets"),
         Binding("w", "load_weights", "Load weights", show=False),
         Binding("c", "duplicate", "Duplicate", show=False),
         Binding("r", "rename", "Rename", show=False),
@@ -59,6 +61,7 @@ class HomeScreen(Screen):
                 with Horizontal(classes="toolbar"):
                     yield Button("✚ New", id="new", variant="primary")
                     yield Button("⇪ Import", id="import")
+                    yield Button("🗄 Datasets", id="datasets")
                     yield Button("Load weights", id="load_weights")
                     yield Button("Duplicate", id="duplicate")
                     yield Button("Rename", id="rename")
@@ -204,6 +207,18 @@ class HomeScreen(Screen):
 
         name = self.selected  # the lessons and encyclopedia work without a model
         self.app.push_screen(GuideScreen(self.ws.load_spec(name) if name else None))
+
+    def action_datasets(self) -> None:
+        from .datasets import DatasetScreen
+
+        name = self.selected
+
+        def done(cfg):
+            if cfg and name:
+                from .train import TrainScreen
+
+                self.app.push_screen(TrainScreen(name, finetune=False, preset=cfg))
+        self.app.push_screen(DatasetScreen(f"▶ Train '{name}' on it" if name else None), done)
 
     def action_import(self) -> None:
         def done(res):
