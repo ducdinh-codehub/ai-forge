@@ -27,10 +27,13 @@ class TrainScreen(Screen):
                 Binding("less_than_sign", "resize_guide(0.05)", "Wider guide", show=False),
                 Binding("greater_than_sign", "resize_guide(-0.05)", "Narrower guide", show=False)]
 
-    def __init__(self, name: str, finetune: bool):
+    def __init__(self, name: str, finetune: bool, preset: dict | None = None):
+        """preset: data settings to load right away (e.g. picked in the dataset hub)."""
         super().__init__()
         self.model_name = name
         self.finetune = finetune
+        self.preset = preset
+        self.hub_key = preset.get("hub") if preset else None
         self.spec = None  # working copy, set on mount
         self.info = None
         self.train_ds = self.val_ds = None
@@ -53,6 +56,7 @@ class TrainScreen(Screen):
                 yield Static("① Data", classes="section-title")
                 yield Select([(v, k) for k, v in datamod.SOURCES.items()], value="synthetic",
                              allow_blank=False, id="source")
+                yield Button("🗄 Get a famous dataset…", id="hub")
                 with Vertical(id="grp-path", classes="group"):
                     yield Label("Path", id="path-label")
                     with Horizontal(classes="path-row"):
@@ -176,6 +180,8 @@ class TrainScreen(Screen):
         self.set_interval(1.0, self._sample_system)
         self._apply_previous_dataset()
         self._update_source_fields()
+        if self.preset:
+            self._use_dataset(self.preset)
         if self.finetune:
             self.query_one("#save_as", Input).value = self.ws.unique_name(self.model_name + "-ft")
             self._fill_freeze_list()
@@ -213,6 +219,26 @@ class TrainScreen(Screen):
                 self.query_one("#kind", Select).value = prev["kind"]
         except Exception:  # noqa: BLE001
             pass
+
+    @on(Button.Pressed, "#hub")
+    def _open_hub(self) -> None:
+        from .datasets import DatasetScreen
+
+        self.app.push_screen(DatasetScreen("✓ Use this dataset", focus=self.hub_key), self._use_dataset)
+
+    def _use_dataset(self, cfg: dict | None) -> None:
+        """Fill the data fields from a hub dataset and load it."""
+        if not cfg:
+            return
+        self.hub_key = cfg.get("hub")
+        self.query_one("#source", Select).value = cfg["source"]
+        self.query_one("#path", Input).value = cfg.get("path") or ""
+        self._update_source_fields()  # fills the column lists from the new CSV
+        for sel_id, key in (("#target", "target"), ("#text_column", "text_column")):
+            if cfg.get(key):
+                self.query_one(sel_id, Select).value = cfg[key]
+        self.query_one("#task", Select).value = cfg.get("task") or "auto"
+        self._load_pressed()
 
     def _fill_freeze_list(self) -> None:
         sl = self.query_one("#freeze", SelectionList)

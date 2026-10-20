@@ -79,3 +79,12 @@ Screen { background: $background; }
 #drawer-head Button { margin-left: 1; min-width: 5; }
 #drawer-topics { height: auto; max-height: 12; margin-top: 1; }
 #drawer-body { height: 1fr; margin-top: 1; }
+
+/* Dataset hub -------------------------------------------------------------- */
+#hub-nav-pane { width: 46; padding: 0 1; border-right: tall $panel; }
+#hub-list { height: 1fr; }
+#hub-detail-pane { width: 1fr; padding: 0 1 1 2; }
+#hub-body { height: 1fr; }
+#hub-status { height: auto; margin-top: 1; }
+#hub-progress { margin-top: 1; }
+#train-config #hub { margin-top: 1; width: 100%; }

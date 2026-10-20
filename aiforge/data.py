@@ -20,8 +20,10 @@ SOURCES = {
     "mnist": "MNIST handwritten digits (auto-download, 28×28×1)",
     "fashion_mnist": "Fashion-MNIST clothing (auto-download, 28×28×1)",
     "cifar10": "CIFAR-10 objects (auto-download, 32×32×3)",
+    "cifar100": "CIFAR-100 objects, 100 classes (auto-download, 32×32×3)",
 }
 SYNTHETIC = ["moons", "spirals", "circles", "blobs", "regression"]
+TORCHVISION = ("mnist", "fashion_mnist", "cifar10", "cifar100")
 IMAGE_EXT = {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp"}
 
 
@@ -57,7 +59,7 @@ def load(cfg: dict, data_dir: Path, spec=None) -> tuple[Dataset, Dataset, DataIn
                              prev.get("vocab") if prev.get("type") == "text" else None)
     elif src == "image_folder":
         ds, info = _image_folder(Path(cfg["path"]).expanduser(), spec)
-    elif src in ("mnist", "fashion_mnist", "cifar10"):
+    elif src in TORCHVISION:
         return _torchvision(src, data_dir, spec)
     else:
         raise ValueError(f"Unknown data source {src}")
@@ -319,6 +321,7 @@ def _torchvision(name: str, data_dir: Path, spec):
         "mnist": (datasets.MNIST, [1, 28, 28], [0.1307], [0.3081]),
         "fashion_mnist": (datasets.FashionMNIST, [1, 28, 28], [0.2860], [0.3530]),
         "cifar10": (datasets.CIFAR10, [3, 32, 32], [0.4914, 0.4822, 0.4465], [0.2470, 0.2435, 0.2616]),
+        "cifar100": (datasets.CIFAR100, [3, 32, 32], [0.5071, 0.4865, 0.4409], [0.2673, 0.2564, 0.2762]),
     }[name]
     cls, shape, mean, std = meta
     pre = {"type": "image", "size": shape[1:], "channels": shape[0], "mean": mean, "std": std}
