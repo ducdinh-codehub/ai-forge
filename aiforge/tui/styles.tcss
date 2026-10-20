@@ -15,6 +15,9 @@ Screen { background: $background; }
 #library { width: 1fr; padding: 0 1; }
 #models { height: 1fr; }
 #details-pane { width: 72; padding: 0 1; border-left: tall $panel; }
+/* 7 actions don't fit one row of the 72-column pane: two rows of 4 */
+#details-pane > .toolbar { layout: grid; grid-size: 4; grid-rows: 3; grid-gutter: 0 1; height: auto; }
+#details-pane > .toolbar Button { width: 100%; margin-right: 0; }
 #details { height: 1fr; margin-top: 1; }
 #details-text { width: 100%; }
 #empty-hint { height: 1fr; content-align: center middle; text-align: center; color: $text-muted; background: $boost; }
@@ -91,3 +94,19 @@ Screen { background: $background; }
 #hub-status { height: auto; margin-top: 1; }
 #hub-progress { margin-top: 1; }
 #train-config #hub { margin-top: 1; width: 100%; }
+
+/* Evaluate ----------------------------------------------------------------- */
+#eval-config { width: 52; padding: 0 1; border-right: tall $panel; }
+#eval-config Label { margin-top: 1; }
+#eval-config .group { height: auto; }
+#eval-config .path-row { height: auto; }
+#eval-config .path-row Input { width: 1fr; }
+#eval-config .switch-row { height: auto; margin-top: 1; }
+#eval-config .switch-row Label { margin: 1 0 0 1; }
+#eval-config Button { width: 100%; margin-top: 1; }
+#eval-config .path-row Button { width: auto; margin-top: 0; }
+#eval-history { margin-top: 1; }
+#eval-result { width: 1fr; padding: 0 1; }
+#eval-status { height: auto; }
+#eval-progress { margin: 1 0 0 0; }
+#eval-body { height: 1fr; margin-top: 1; }

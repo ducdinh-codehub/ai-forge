@@ -492,6 +492,71 @@ Text    : Embedding → LSTM → Linear
 - The **Layer encyclopedia** in this guide explains every layer you can add.
 """
 
+EVALUATING = """\
+# 7. Is my model any good?
+
+A high number on the training charts isn't proof. A good evaluation answers three questions:
+**how often is it right, where does it go wrong, and can I trust it?** Press **`v`** on the
+home screen (📊 **Evaluate**) to get all of this in one report.
+
+## Always test on unseen data
+
+Use the **validation split** (examples kept aside during training) or a separate test file.
+Testing on training examples is like grading a student with the exact exam they practised on.
+
+## Classification metrics (predicting a category)
+
+| Metric | Plain meaning | Use it when |
+|---|---|---|
+| **Accuracy** | Share of correct answers | Classes are roughly the same size |
+| **Precision** | When it says "spam", how often is it really spam? | False alarms are costly |
+| **Recall** | Of all real spam, how much did it catch? | Missing one is costly (e.g. disease screening) |
+| **F1** | A balance of precision and recall | You care about both |
+| **Balanced accuracy / macro F1** | Every class counts equally | Some classes are rare |
+| **ROC-AUC** | How well it ranks right answers above wrong ones (0.5 = guessing, 1 = perfect) | Comparing models regardless of threshold |
+| **PR-AUC** | Like ROC-AUC, but honest when one class is rare | Heavily imbalanced data |
+| **Confusion matrix** | A table of which class gets mistaken for which | Finding *where* it goes wrong |
+| **Log loss, calibration** | Are its confidence numbers believable? | You'll use the probabilities |
+
+> ⚠️ **The accuracy trap:** if 95% of emails are normal, a model that always says "normal"
+> scores 95% accuracy and catches no spam at all. Look at recall and macro F1 instead.
+
+## Regression metrics (predicting a number)
+
+| Metric | Plain meaning |
+|---|---|
+| **MAE** | The average mistake, in the target's own units (e.g. "off by $12,000 on average") |
+| **RMSE** | Like MAE, but big mistakes count extra |
+| **R²** | Share of the ups and downs the model explains: 1 = perfect, 0 = no better than the average |
+| **MAPE** | Average mistake in %. Breaks down when true values are near zero |
+
+## Checks that catch hidden problems
+
+- **Baseline:** compare with a "dumb" model that always guesses the most common class or the
+  average. If yours barely beats it, it hasn't learned much.
+- **Confidence intervals:** with few test examples, scores are noisy. "90% (85-94%)" means the
+  true score is probably somewhere in that range.
+- **Error analysis:** read the worst mistakes yourself. You'll often spot wrong labels, a
+  confusing class or unusual inputs.
+- **Slices:** check results per group (region, product type, age group…). A good average can
+  hide a group where the model fails, which is also a fairness problem.
+- **Robustness:** add a little noise to the inputs. A model whose score collapses is fragile.
+- **Learning curves:** training and validation scores far apart = overfitting; both low =
+  underfitting (see lesson 5).
+- **Model A vs B:** a small difference can be pure luck. A significance test (McNemar for
+  classification, a paired bootstrap for regression) tells you if it's real: p < 0.05 means
+  "probably not chance".
+
+## Beyond AIForge
+
+Other kinds of models use their own metrics: object detection (IoU, mAP), image generation
+(FID), translation and summaries (BLEU, ROUGE, BERTScore), chatbots and LLMs (human ratings,
+"LLM-as-a-judge", tests on your own real questions), search and recommendations
+(Precision@k, NDCG). The ideas above still apply: unseen data, a baseline, and looking at the
+mistakes.
+"""
+
+
 # ---------------------------------------------------------------------------
 
 LESSONS: dict[str, tuple[str, str]] = {
@@ -501,6 +566,7 @@ LESSONS: dict[str, tuple[str, str]] = {
     "learn:training": ("4. How models learn", TRAINING),
     "learn:fitting": ("5. Over/underfitting", FITTING),
     "learn:workflow": ("6. Your first project", WORKFLOW),
+    "learn:evaluate": ("7. Is my model good?", EVALUATING),
     "learn:choose": ("Which type to choose?", CHOOSE_TYPE),
     "learn:tabular": ("📊 Tabular data", TABULAR),
     "learn:vision": ("🖼 Computer vision", VISION),
@@ -509,7 +575,7 @@ LESSONS: dict[str, tuple[str, str]] = {
 }
 
 BASICS = ["learn:what", "learn:data", "learn:tasks", "learn:training", "learn:fitting",
-          "learn:workflow"]
+          "learn:workflow", "learn:evaluate"]
 TYPES = ["learn:choose", "learn:tabular", "learn:vision", "learn:language", "learn:manual"]
 
 
