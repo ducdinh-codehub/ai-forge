@@ -48,7 +48,7 @@ class ModelSpec:
     name: str
     input_shape: list[int]
     input_dtype: str = "float"  # "float" or "long" (token ids)
-    task: str = "classification"  # or "regression"
+    task: str = "classification"  # "regression" or "language_model" (predict the next token)
     layers: list[LayerSpec] = field(default_factory=list)
     class_names: list[str] = field(default_factory=list)
     # Preprocessing learned from the training data (normalisation stats, image size...).
@@ -91,6 +91,9 @@ class ModelSpec:
         if not self.layers:
             problems.append("The model has no layers.")
         out = None if problems else self.output_shape()
+        if out is not None and self.task == "language_model":
+            problems += self._language_model_problems(out)
+            return problems
         if out is not None and len(out) != 1:
             problems.append(f"Final output must be a flat vector, got shape {out}. "
                             "Add Flatten / GlobalAvgPool before the head.")
@@ -100,6 +103,26 @@ class ModelSpec:
                             f"{len(self.class_names)} classes. Set the last Linear's "
                             f"out_features to {len(self.class_names)}.")
         return problems
+
+    def vocab_size(self) -> int | None:
+        """Number of tokens the first Embedding knows (None without one)."""
+        emb = next((l for l in self.layers if l.type == "Embedding"), None)
+        return int(emb.config["num_embeddings"]) if emb else None
+
+    def _language_model_problems(self, out: Shape) -> list[str]:
+        if self.input_dtype != "long" or len(self.input_shape) != 1:
+            return ["A language model reads token ids: set the input type to 'long' with one dimension "
+                    "(the number of tokens it reads at once)."]
+        if len(out) != 2 or out[0] != self.input_shape[0]:
+            return [f"A language model must output a score for every vocabulary token at every "
+                    f"position, shape ({self.input_shape[0]}, vocab), but this one outputs {out}. "
+                    "Remove SequencePool / Flatten and end with a Linear layer (for LSTM/GRU, turn on "
+                    "return_sequence)."]
+        vocab = self.vocab_size()
+        if vocab and out[1] != vocab:
+            return [f"The last layer outputs {out[1]} scores per position but the vocabulary has {vocab} "
+                    f"tokens (the Embedding size). Set the last Linear's out_features to {vocab}."]
+        return []
 
     # -- building ----------------------------------------------------------
 
@@ -411,6 +434,27 @@ TEMPLATES: dict[str, dict] = {
                         _L("PositionalEncoding"),
                         _L("TransformerEncoder", num_layers=4, num_heads=4, ff_dim=512, causal=True),
                         _L("SequencePool", mode="last"), _L("Linear", out_features=2)]),
+    # --- language models (generate text) ---
+    # Vocabulary sizes are placeholders: training sets them from the text (auto-fit).
+    "Tiny GPT (characters, fast)": dict(
+        input_shape=[64], input_dtype="long", task="language_model", tokenizer="char",
+        # causal: while learning, position i may only look at tokens 0..i - otherwise it would just
+        # read the answer (the next token) instead of predicting it
+        layers=lambda: [_L("Embedding", num_embeddings=96, embedding_dim=128),
+                        _L("PositionalEncoding"), _L("Dropout", p=0.1),
+                        _L("TransformerEncoder", num_layers=4, num_heads=4, ff_dim=512, causal=True),
+                        _L("Linear", out_features=96)]),
+    "GPT-small (words, needs more text)": dict(
+        input_shape=[64], input_dtype="long", task="language_model", tokenizer="word",
+        layers=lambda: [_L("Embedding", num_embeddings=8000, embedding_dim=192),
+                        _L("PositionalEncoding"), _L("Dropout", p=0.1),
+                        _L("TransformerEncoder", num_layers=4, num_heads=6, ff_dim=768, causal=True),
+                        _L("Linear", out_features=8000)]),
+    "LSTM language model (characters)": dict(
+        input_shape=[64], input_dtype="long", task="language_model", tokenizer="char",
+        layers=lambda: [_L("Embedding", num_embeddings=96, embedding_dim=64),
+                        _L("LSTM", hidden_size=256, num_layers=2, return_sequence=True, dropout=0.1),
+                        _L("Linear", out_features=96)]),
 }
 
 
@@ -427,7 +471,10 @@ MODEL_TYPES: dict[str, list[str]] = {
                                    "Vision Transformer (ViT, 32×32 colour)",
                                    "Vision Transformer (ViT, 28×28 grayscale)",
                                    "Hybrid CNN + Transformer (32×32 colour)"],
-    "💬 Language / NLP (text, LLM-style Transformer)": ["Text Transformer classifier",
+    "🧠 Language model (generate text, tiny GPT)": ["Tiny GPT (characters, fast)",
+                                                    "GPT-small (words, needs more text)",
+                                                    "LSTM language model (characters)"],
+    "💬 Text classification (sentiment, spam, topics)": ["Text Transformer classifier",
                                                         "BERT-style Transformer (deeper encoder)",
                                                         "GPT-style Transformer (causal attention)",
                                                         "Text classifier (Embedding + LSTM)",
@@ -441,7 +488,8 @@ def from_template(template: str, name: str) -> ModelSpec:
     t = TEMPLATES[template]
     return ModelSpec(name=name, input_shape=list(t["input_shape"]),
                      input_dtype=t.get("input_dtype", "float"),
-                     task=t.get("task", "classification"), layers=t["layers"]())
+                     task=t.get("task", "classification"), layers=t["layers"](),
+                     data={"tokenizer": t["tokenizer"]} if "tokenizer" in t else {})
 
 
 # ---------------------------------------------------------------------------
