@@ -27,6 +27,7 @@ Build, train and share neural networks - no code needed.
  [reverse] s [/reverse] [b]Datasets[/b]   download famous, trusted datasets to train on
 
 Already have a model? Press [reverse] i [/reverse] to import it.
+Found a bug or have an idea? Press [reverse] Ctrl+O [/reverse] to tell us on GitHub.
 
 [dim]New here? Press [b]g[/b] to read the beginner lessons, or press [b]n[/b], keep the
 default template, then press [b]t[/b] and train on the built-in "spirals" toy data.[/dim]"""
