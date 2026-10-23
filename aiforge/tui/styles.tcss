@@ -15,7 +15,7 @@ Screen { background: $background; }
 #library { width: 1fr; padding: 0 1; }
 #models { height: 1fr; }
 #details-pane { width: 72; padding: 0 1; border-left: tall $panel; }
-/* 7 actions don't fit one row of the 72-column pane: two rows of 4 */
+/* 8 actions don't fit one row of the 72-column pane: two rows of 4 */
 #details-pane > .toolbar { layout: grid; grid-size: 4; grid-rows: 3; grid-gutter: 0 1; height: auto; }
 #details-pane > .toolbar Button { width: 100%; margin-right: 0; }
 #details { height: 1fr; margin-top: 1; }

@@ -77,14 +77,26 @@ class HomeScreen(Screen):
                     yield Button("📊 Evaluate", id="evaluate")
                     yield Button("⇩ Export", id="export")
                     yield Button("📖 Guide", id="guide")
+                    yield Button(self._theme_label(), id="toggle_theme")
                 with VerticalScroll(id="details"):
                     yield Static(WELCOME, id="details-text")
         yield Footer()
 
     def on_mount(self) -> None:
         t = self.query_one("#models", DataTable)
+        self.app.theme_changed_signal.subscribe(self, lambda _: self._sync_theme_button())
         t.add_columns("Name", "Task", "Layers", "Params", "Weights", "Epochs", "Modified")
         self.refresh_models()
+
+    def _theme_label(self) -> str:
+        # The button names the theme it switches *to*.
+        return "☀ Light" if self.app.current_theme.dark else "☾ Dark"
+
+    def _sync_theme_button(self) -> None:
+        self.query_one("#toggle_theme", Button).label = self._theme_label()
+
+    def action_toggle_theme(self) -> None:
+        self.app.action_toggle_theme()
 
     def on_resize(self, event) -> None:
         # Give the model list the room on small terminals.
