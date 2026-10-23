@@ -50,6 +50,10 @@ class Banner(Widget):
         self.refresh()
 
     def render(self) -> Text:
+        # The neon stops wash out on a light background: darken them there, and
+        # fade the "shadow" towards white instead of black.
+        light = not self.app.current_theme.dark
+        main = 0.7 if light else 1.0
         width = len(LOGO[0])
         pad = " " * max(0, (self.size.width - width) // 2)
         out = Text()
@@ -61,13 +65,17 @@ class Banner(Widget):
                     continue
                 # Diagonal sweep: colour depends on column and row.
                 r, g, b = _gradient(col / (width * 1.6) + row * 0.02 + self.phase)
-                if ch != "█":  # the box-drawing "shadow" is drawn dimmer
+                if ch == "█":
+                    r, g, b = (round(c * main) for c in (r, g, b))
+                elif light:  # the box-drawing "shadow" is drawn fainter
+                    r, g, b = (round(c + (255 - c) * 0.5) for c in (r, g, b))
+                else:
                     r, g, b = (round(c * 0.45) for c in (r, g, b))
                 out.append(ch, Style(color=Color.from_rgb(r, g, b), bold=ch == "█"))
             out.append("\n")
         tag_pad = " " * max(0, (self.size.width - len(TAGLINE)) // 2)
         out.append(tag_pad)
         for i, ch in enumerate(TAGLINE):
-            r, g, b = _gradient(i / (len(TAGLINE) * 1.6) + self.phase + 0.15)
+            r, g, b = (round(c * main) for c in _gradient(i / (len(TAGLINE) * 1.6) + self.phase + 0.15))
             out.append(ch, Style(color=Color.from_rgb(r, g, b), italic=True))
         return out
