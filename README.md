@@ -25,7 +25,7 @@ With the mouse or keyboard you can:
 2. **Train** it on a CSV table, text, images, or a famous public dataset
 3. **Fine-tune** a trained model for a new, related task
 4. **Evaluate** how good it really is
-5. **Use** it to make predictions
+5. **Use** it to make predictions, or let a tiny GPT **write text**
 6. **Export** it for Python, ONNX Runtime, mobile apps and more
 
 No PyTorch or Python knowledge needed. The built-in **Guide** (`g`) teaches the ML basics.
@@ -150,6 +150,7 @@ reset the output layer, and save under a **new name** so the original stays safe
 | A table | Values in column order: `6, 3.5, red` |
 | Text | A sentence: `what an amazing movie` |
 | Images | An image path: `~/Pictures/cat.jpg` |
+| Plain text (language model) | The start of a text: `Twinkle, twinkle`. The model writes what comes next; set the length and temperature (low = safe, high = creative) |
 
 Give it a whole CSV or image folder for **batch prediction** (writes a CSV with predictions).
 
@@ -160,12 +161,13 @@ separate file or folder with the true answers) and click **▶ Evaluate** (`Ctrl
 | Section | What it shows |
 |---|---|
 | **Verdict + warnings** | Strong / Good / Weak / Not useful, plus e.g. "classes are imbalanced: accuracy is misleading" |
-| **Metrics vs. a baseline** | Classification: accuracy, balanced accuracy, F1, ROC-AUC, PR-AUC, log loss, calibration. Regression: MAE, RMSE, MSE, R², MAPE. With 95% confidence intervals. |
+| **Metrics vs. a baseline** | Classification: accuracy, balanced accuracy, F1, ROC-AUC, PR-AUC, log loss, calibration. Regression: MAE, RMSE, MSE, R², MAPE. Language model: perplexity, next-token accuracy, bits per token. With 95% confidence intervals. |
 | **Per class · confusion matrix · calibration** | Which classes it gets wrong, mixes up, or is over-confident about |
 | **Error analysis** | Its worst mistakes, with the actual example (row values, text or file name) |
 | **Slices** | Results per group of each category column in a table (fairness check) |
 | **Robustness · learning curves** | Score with noisy inputs; over- or underfitting from the training history |
 | **Compare with another model** | Which of two models is better, with a significance test |
+| **Language models** | Samples of what it writes at 3 temperatures, and the tokens it finds hardest |
 
 ![Evaluate](https://raw.githubusercontent.com/ducdinh-codehub/ai-forge/main/docs/images/19-evaluate.png)
 
@@ -205,7 +207,8 @@ press **⇩ Download**, then **▶ Train on it**. AIForge fills in all the field
 |---|---|
 | 📊 Tabular | Iris · Wine · Breast cancer · Adult income · Red wine quality · California housing |
 | 🖼 Vision | MNIST · Fashion-MNIST · CIFAR-10 · CIFAR-100 · Imagenette · Oxford-IIIT Pets |
-| 💬 Text | SMS Spam · SST-2 · IMDB reviews · AG News |
+| 💬 Text classification | SMS Spam · SST-2 · IMDB reviews · AG News |
+| 🧠 Language model | Tiny Shakespeare |
 
 All come from their official sources (UCI, Stanford, Oxford, U. Toronto, Zalando, fast.ai).
 Each one shows its publisher, license, size and the templates that suit it. Downloads show
@@ -223,6 +226,7 @@ Sample files are under **📦 Examples** in the browser.
 | **Table** (CSV) | One row per example. The **last column** is predicted (or choose another). Text columns and missing numbers are handled for you. |
 | **Text** (CSV) | A text column and a label column: `"great movie",pos` |
 | **Images** | A folder with **one sub-folder per class** (`cat/`, `dog/`). Images are resized automatically. |
+| **Plain text** (.txt) | Any text for a language model to imitate: a book, poems, lyrics, code. Split into characters or words. A short sample (`nursery_rhymes.txt`) is built in; aim for 1 MB+ for real sentences. |
 
 > **How much data?** For images, aim for 50–100+ per class. With fewer, use a
 > **Transfer learning** template.
@@ -241,6 +245,7 @@ Sample files are under **📦 Examples** in the browser.
 | 💬 Sentences / reviews | Text Transformer classifier |
 | 💬 Longer or harder texts | BERT-style Transformer |
 | 💬 Simpler / faster | LSTM · bidirectional GRU · Bag of words (fastest) |
+| 🧠 Generate text (write like a book, poems, code…) | **Tiny GPT** (characters) · GPT-small (words, needs lots of text) · LSTM language model |
 | ✎ Design it all yourself | Blank |
 
 You can change any layer after creating the model.

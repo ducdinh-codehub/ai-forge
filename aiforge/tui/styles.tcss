@@ -64,6 +64,10 @@ Screen { background: $background; }
 
 /* Predict / Export --------------------------------------------------------- */
 #predict, #export { padding: 0 2; }
+#gen-row { height: auto; margin-top: 1; }
+#gen-row Label { margin: 1 1 0 0; }
+#gen-row Input { width: 12; margin-right: 2; }
+#batch-section { height: auto; }
 #result { height: auto; margin: 1 0; padding: 1 2; background: $boost; min-height: 3; }
 #predict-log, #export-log { height: 1fr; border: round $panel; margin-top: 1; }
 #formats { height: auto; max-height: 12; }

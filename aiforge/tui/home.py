@@ -153,7 +153,8 @@ class HomeScreen(Screen):
             for i, run in enumerate(hist[-8:], max(1, len(hist) - 7)):
                 last = run["epochs"][-1] if run.get("epochs") else {}
                 metric = (f"val acc {last['val_acc']:.1%}" if "val_acc" in last else
-                          f"val MAE {last['val_mae']:.4g}" if "val_mae" in last else "")
+                          f"val MAE {last['val_mae']:.4g}" if "val_mae" in last else
+                          f"val perplexity {last['val_ppl']:.2f}" if "val_ppl" in last else "")
                 kind = run.get("kind", "train")
                 text.append(f" {i}. {run['started']}  {kind:<9} {len(run.get('epochs', []))} ep  "
                             f"loss {last.get('val_loss', last.get('train_loss', 0)):.4f}  {metric}"
@@ -163,6 +164,8 @@ class HomeScreen(Screen):
         if evals := self._evaluations(name):
             h = evals[-1]
             score = (f"accuracy {h['accuracy']:.1%} · macro F1 {h['macro_f1']:.3f}" if "accuracy" in h
+                     else f"perplexity {h['perplexity']:.2f} · next-token accuracy {h['token_accuracy']:.1%}"
+                     if "perplexity" in h
                      else f"MAE {h['mae']:.4g}" + (f" · R² {h['r2']:.3f}" if h.get("r2") is not None else ""))
             text += ["", "[b]Last evaluation[/b]", f" {h['date']}  {score}  [dim]{h['data']}[/]"]
         box.update("\n".join(text))

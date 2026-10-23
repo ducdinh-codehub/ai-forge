@@ -129,6 +129,8 @@ def load_eval_data(spec: ModelSpec, data_dir: Path, source: str = "val", path: s
     """Returns (eval dataset, reference labels for the baseline or None, description,
     whether regression targets are already in original units)."""
     pre = spec.data.get("preprocess", {})
+    if spec.task == "language_model":
+        return _lm_eval_data(spec, data_dir, source, path)
     if source == "val":
         cfg = spec.data.get("dataset_cfg")
         if not cfg:
@@ -154,6 +156,30 @@ def load_eval_data(spec: ModelSpec, data_dir: Path, source: str = "val", path: s
         mapping = _class_mapping(spec, info.class_names)
         if mapping:
             ds = _Relabel(ds, mapping)
+    return ds, None, info.description, False
+
+
+def _lm_eval_data(spec: ModelSpec, data_dir: Path, source: str, path: str):
+    """Language models: windows of text (not overlapping), plus the training text's tokens for
+    the baseline."""
+    pre = spec.data.get("preprocess", {})
+    if pre.get("type") != "corpus":
+        raise ValueError("This language model has no vocabulary saved - train it in AIForge first.")
+    if source == "val":
+        cfg = spec.data.get("dataset_cfg")
+        if not cfg:
+            raise ValueError("This model wasn't trained in AIForge, so there is no validation text. "
+                             "Choose 'A different file / folder'.")
+        tr, va, info = datamod.load(dict(cfg), data_dir, spec)
+        if len(va) == 0:
+            raise ValueError("The model was trained without a validation split (0), or the text is too "
+                             "short to keep some aside. Evaluate on a different text file instead.")
+        return va, tr.tokens.numpy(), f"validation part of {info.description.split(':')[0]} " \
+                                      f"({len(va.tokens):,} tokens)", False
+    p = Path(path).expanduser()
+    tr, _, info = datamod.load({"source": "text_corpus", "path": str(p), "tokenizer": pre["tokenizer"],
+                                "val_split": 0}, data_dir, spec)
+    ds = datamod.TextWindows(tr.tokens, tr.seq_len, tr.seq_len)
     return ds, None, info.description, False
 
 
@@ -444,6 +470,9 @@ def evaluate_model(spec: ModelSpec, model: nn.Module, ds, ref_labels, descriptio
                    robustness: bool = True, other: tuple[str, ModelSpec, nn.Module] | None = None,
                    progress: Callable[[str, int, int], None] | None = None) -> dict:
     progress = progress or (lambda *a: None)
+    if spec.task == "language_model":
+        return evaluate_language_model(spec, model, ds, ref_labels, description, device, history, other,
+                                       progress)
     pre = spec.data.get("preprocess", {})
     tabular = pre.get("type") == "tabular"
     out, y, x = run_model(model, ds, device, keep_x=tabular,
@@ -569,14 +598,151 @@ def evaluate_model(spec: ModelSpec, model: nn.Module, ds, ref_labels, descriptio
 def compatible(spec_a: ModelSpec, spec_b: ModelSpec) -> bool:
     """Can model B be run on model A's evaluation data and compared fairly?"""
     pa, pb = spec_a.data.get("preprocess", {}), spec_b.data.get("preprocess", {})
+    if spec_a.task == "language_model":  # any input length works, but the token ids must mean the same
+        return (spec_a.name != spec_b.name and spec_b.task == "language_model"
+                and pa.get("type") == pb.get("type") == "corpus" and pa.get("vocab") == pb.get("vocab"))
     return (spec_a.name != spec_b.name and spec_a.task == spec_b.task
             and spec_a.input_shape == spec_b.input_shape and spec_a.input_dtype == spec_b.input_dtype
             and spec_a.class_names == spec_b.class_names and pa.get("type") == pb.get("type")
             and (pa.get("type") != "text" or pa.get("vocab") == pb.get("vocab")))
 
 
+# ---------------------------------------------------------------------------
+# Language models
+# ---------------------------------------------------------------------------
+
+SAMPLE_TEMPERATURES = (0.5, 0.8, 1.0)
+
+
+@torch.no_grad()
+def run_language_model(model: nn.Module, ds, device, progress: Callable[[int, int], None] | None = None,
+                       batch_size: int = 64):
+    """Per-token results, shape (windows, seq_len): loss (−log p of the true next token), whether
+    it was the top guess / in the top 5, and the true token ids. Keeps no logits, which would be
+    windows × seq_len × vocab numbers."""
+    model.eval().to(device)
+    nll, top1, top5, ys = [], [], [], []
+    done = 0
+    for x, y in DataLoader(ds, batch_size=batch_size, shuffle=False):
+        x, y = x.to(device), y.to(device)
+        logp = model(x).float().log_softmax(-1)
+        nll.append(-logp.gather(-1, y.unsqueeze(-1)).squeeze(-1).cpu())
+        best = logp.topk(min(5, logp.shape[-1]), -1).indices
+        top1.append((best[..., 0] == y).cpu())
+        top5.append((best == y.unsqueeze(-1)).any(-1).cpu())
+        ys.append(y.cpu())
+        done += len(x)
+        if progress:
+            progress(done, len(ds))
+    model.cpu()
+    return tuple(torch.cat(t).numpy() for t in (nll, top1, top5, ys))
+
+
+def _ppl(loss: float) -> float:
+    return float(math.exp(min(loss, 50.0)))
+
+
+def evaluate_language_model(spec: ModelSpec, model: nn.Module, ds, ref_tokens, description: str, device,
+                            history: list[dict] | None = None,
+                            other: tuple[str, ModelSpec, nn.Module] | None = None,
+                            progress: Callable[[str, int, int], None] | None = None) -> dict:
+    from .predict import show_token
+    from .textgen import generate
+
+    progress = progress or (lambda *a: None)
+    pre = spec.data["preprocess"]
+    vocab = pre["vocab"]
+    if len(ds) == 0:
+        raise ValueError(f"The text is too short: it needs more than {pre['seq_len']} tokens.")
+    nll, top1, top5, y = run_language_model(model, ds, device,
+                                            progress=lambda d, t: progress("Running the model", d, t))
+    loss = float(nll.mean())
+    per_window = nll.mean(1)
+    rng = np.random.default_rng(0)
+    boots = [_ppl(per_window[rng.integers(0, len(per_window), len(per_window))].mean())
+             for _ in range(BOOTSTRAP)]
+    m = {"perplexity": _ppl(loss), "perplexity_ci": _ci(boots), "loss": loss,
+         "bits_per_token": loss / math.log(2), "token_accuracy": float(top1.mean()),
+         "top5_accuracy": float(top5.mean()), "tokens": int(nll.size), "windows": len(ds),
+         "vocab": len(vocab), "tokenizer": pre["tokenizer"]}
+
+    # Baseline: a "model" that ignores the context and always guesses by overall token frequency.
+    ref = ref_tokens if ref_tokens is not None and len(ref_tokens) else y.reshape(-1)
+    counts = np.bincount(ref.astype(int), minlength=len(vocab))[:len(vocab)].astype(float) + 1  # +1: unseen ≠ impossible
+    counts[0] = 0 if len(vocab) > 1 else 1
+    prior = counts / counts.sum()
+    uni = float(-np.log(np.clip(prior[y.reshape(-1)], 1e-12, 1)).mean())
+    baseline = {"kind": "guess by word/character frequency only, ignoring the context",
+                "source": "training text" if ref_tokens is not None and len(ref_tokens) else "evaluation text",
+                "perplexity": _ppl(uni), "token_accuracy": float((y == int(prior.argmax())).mean()),
+                "uniform_perplexity": float(max(1, len(vocab) - 1))}
+
+    rep: dict = {"model": spec.name, "task": spec.task, "data": description,
+                 "date": time.strftime("%Y-%m-%d %H:%M"), "warnings": [], "metrics": m, "baseline": baseline,
+                 "errors": [], "slices": [], "robustness": []}
+
+    # Hardest tokens: which tokens does the model find most surprising? (frequent ones only)
+    flat_y, flat_nll, flat_top1 = y.reshape(-1), nll.reshape(-1), top1.reshape(-1)
+    n_tok = np.bincount(flat_y, minlength=len(vocab))
+    mean_nll = np.bincount(flat_y, weights=flat_nll, minlength=len(vocab)) / np.maximum(n_tok, 1)
+    acc_tok = np.bincount(flat_y, weights=flat_top1, minlength=len(vocab)) / np.maximum(n_tok, 1)
+    often = [i for i in np.argsort(-mean_nll) if n_tok[i] >= 5 and i != 0][:TOP_ERRORS]
+    rep["hardest"] = [{"token": show_token(vocab[i]), "count": int(n_tok[i]),
+                       "probability": float(math.exp(-mean_nll[i])), "accuracy": float(acc_tok[i])}
+                      for i in often]
+
+    # What it writes, at a few temperatures (same seed, so reports are reproducible).
+    progress("Writing samples", 0, len(SAMPLE_TEMPERATURES))
+    model.to(device)
+    rep["samples"] = []
+    for k, t in enumerate(SAMPLE_TEMPERATURES):
+        rep["samples"].append({"temperature": t, "text": generate(model, pre, "", 300, t, seed=k)})
+        progress("Writing samples", k + 1, len(SAMPLE_TEMPERATURES))
+    model.cpu()
+
+    if m["perplexity"] > baseline["perplexity"] * 0.9:
+        rep["warnings"].append("The model barely beats guessing by token frequency: it hasn't learned to "
+                               "use the context yet. Train longer, or check the learning rate.")
+    if len(ds) < 20:
+        rep["warnings"].append(f"Only {m['tokens']:,} tokens were evaluated: the numbers are rough "
+                               "(see the confidence interval). Use a longer text.")
+    rep["learning"] = _learning_diagnosis(history or [], spec.task)
+    if rep["learning"] and rep["learning"]["verdict"] == "overfitting":
+        rep["warnings"].append("The training history shows overfitting: the model memorizes the training "
+                               "text. A longer text, Dropout or fewer epochs help - see 'Learning curves'.")
+
+    rep["comparison"] = None
+    if other:
+        name_b, spec_b, model_b = other
+        seq_b = spec_b.input_shape[0]
+        ds_b = ds if seq_b >= ds.seq_len else datamod.TextWindows(ds.tokens, seq_b, seq_b)
+        if ds_b is not ds:  # B reads shorter windows: score A on the very same tokens too
+            nll, *_ = run_language_model(model, ds_b, device)
+            per_window = nll.mean(1)
+        nll_b, *_ = run_language_model(model_b, ds_b, device,
+                                       progress=lambda d, t: progress(f"Running {name_b}", d, t))
+        diff = per_window - nll_b.mean(1)
+        boot = np.array([diff[rng.integers(0, len(diff), len(diff))].mean() for _ in range(BOOTSTRAP * 5)])
+        rep["comparison"] = {"other": name_b, "metric": "perplexity",
+                             "score_a": _ppl(float(per_window.mean())), "score_b": _ppl(float(nll_b.mean())),
+                             "test": "paired bootstrap (loss per text window)",
+                             "loss_difference": float(diff.mean()), "ci": _ci(list(boot)),
+                             "p_value": float(min(1.0, 2 * min((boot <= 0).mean(), (boot >= 0).mean())))}
+    rep["verdict"] = _verdict(rep)
+    return rep
+
+
 def _verdict(rep: dict) -> str:
     m, b = rep["metrics"], rep["baseline"]
+    if rep["task"] == "language_model":
+        lift = b["perplexity"] / max(m["perplexity"], 1e-9)
+        if lift < 1.1:
+            return "❌ Not useful yet: no better than guessing by token frequency."
+        if lift >= 4:
+            return f"✅ Strong: {lift:.1f}× less unsure than guessing by frequency - it uses the context well."
+        if lift >= 2:
+            return f"👍 Good: {lift:.1f}× less unsure than guessing by frequency."
+        return f"⚠️ Weak: only {lift:.1f}× better than guessing by frequency."
     if rep["task"] == "classification":
         lift = m["accuracy"] - b["accuracy"]
         if lift < 0.05:
@@ -610,6 +776,8 @@ def _num(v) -> str:
 
 
 def report_markdown(rep: dict) -> str:
+    if rep["task"] == "language_model":
+        return _language_model_markdown(rep)
     m, b = rep["metrics"], rep["baseline"]
     cls = rep["task"] == "classification"
     md = [f"# Evaluation: {rep['model']}", "",
@@ -741,6 +909,60 @@ def report_markdown(rep: dict) -> str:
     return "\n".join(md)
 
 
+def _language_model_markdown(rep: dict) -> str:
+    m, b = rep["metrics"], rep["baseline"]
+    unit = "character" if m["tokenizer"] == "char" else "word"
+    lo, hi = m["perplexity_ci"]
+    md = [f"# Evaluation: {rep['model']}", "", f"**Data:** {rep['data']} · {rep['date']}", "",
+          f"## {rep['verdict']}", ""]
+    if rep["warnings"]:
+        md += [f"- ⚠️ {w}" for w in rep["warnings"]] + [""]
+    md += ["## Metrics", "", "| Metric | Model | Baseline* | What it tells you |", "|---|---|---|---|",
+           f"| **Perplexity** | **{m['perplexity']:.2f}** ({lo:.2f}-{hi:.2f}) | {b['perplexity']:.2f} | "
+           f"How many {unit}s the model is still choosing between, on average. Lower is better; "
+           f"1 = always sure and right. |",
+           f"| Next-{unit} accuracy | {_pct(m['token_accuracy'])} | {_pct(b['token_accuracy'])} | "
+           f"How often its top guess is the real next {unit}. |",
+           f"| Top-5 accuracy | {_pct(m['top5_accuracy'])} | | The real next {unit} is among its 5 best guesses. |",
+           f"| Bits per {unit} | {m['bits_per_token']:.3f} | {math.log2(max(b['perplexity'], 1)):.3f} | "
+           "Same as perplexity, as information: how many yes/no questions each token still needs. |",
+           f"| Loss (cross-entropy) | {m['loss']:.4f} | | What training minimises (log of perplexity). |",
+           "", f"\\*Baseline: {b['kind']} (learned from the {b['source']}). Picking among all "
+           f"{m['vocab']:,} tokens at random would give perplexity {b['uniform_perplexity']:,.0f}. "
+           f"Brackets: 95% bootstrap confidence interval. {m['tokens']:,} {unit}s evaluated.", ""]
+
+    md += ["## What it writes", "", "Generated from scratch (no prompt). Low temperature = safe and "
+           "repetitive, high = creative but more mistakes.", ""]
+    for smp in rep["samples"]:
+        md += [f"**Temperature {smp['temperature']}**", "", "```text", smp["text"].strip("\n"), "```", ""]
+
+    if rep["hardest"]:
+        md += ["## Hardest tokens", "", f"The {unit}s the model predicts worst (seen at least 5 times). "
+               "Rare names and the first word of a new line are usually hard; common short words "
+               "should be easy.", "",
+               "| Token | Times seen | Avg. probability given | Top guess right |", "|---|---|---|---|"]
+        md += [f"| `{h['token'].replace('|', '/')}` | {h['count']:,} | {_pct(h['probability'])} | "
+               f"{_pct(h['accuracy'])} |" for h in rep["hardest"]]
+        md.append("")
+
+    if rep["learning"]:
+        lc = rep["learning"]
+        md += ["## Learning curves", "", f"**{lc['verdict'].capitalize()}.** {lc['text']}", ""]
+        if "best_epoch" in lc:
+            md += [f"Best epoch {lc['best_epoch']} of {lc['epochs']} · final train loss {lc['train_loss']:.4f} · "
+                   f"final validation loss {lc['val_loss']:.4f}", ""]
+
+    if rep["comparison"]:
+        c = rep["comparison"]
+        winner = rep["model"] if c["score_a"] < c["score_b"] else c["other"]
+        md += [f"## Compared with {c['other']}", "", "| Model | Perplexity |", "|---|---|",
+               f"| {rep['model']} | {c['score_a']:.2f} |", f"| {c['other']} | {c['score_b']:.2f} |", "",
+               f"{c['test']}: p = {c['p_value']:.4f}. " +
+               (f"**{winner} is significantly better** (p < 0.05)." if c["p_value"] < 0.05 else
+                "**The difference is not statistically significant** - it could be chance."), ""]
+    return "\n".join(md)
+
+
 def save_report(rep: dict, export_dir: Path) -> Path:
     """Write the report (Markdown + JSON) to exports/<model>/ and remember a summary."""
     stamp = time.strftime("%Y%m%d-%H%M%S")
@@ -760,6 +982,7 @@ def remember(rep: dict, model_dir: Path) -> None:
     except (OSError, ValueError):
         hist = []
     m = rep["metrics"]
-    keys = ("accuracy", "macro_f1", "roc_auc") if rep["task"] == "classification" else ("mae", "rmse", "r2")
+    keys = {"classification": ("accuracy", "macro_f1", "roc_auc"),
+            "language_model": ("perplexity", "token_accuracy")}.get(rep["task"], ("mae", "rmse", "r2"))
     hist.append({"date": rep["date"], "data": rep["data"], **{k: m[k] for k in keys}})
     f.write_text(json.dumps(hist[-50:], indent=2))
