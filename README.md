@@ -192,6 +192,20 @@ model with a design review, and an encyclopedia of every layer.
 
 ![Guide](https://raw.githubusercontent.com/ducdinh-codehub/ai-forge/main/docs/images/13-guide-overview.png)
 
+### Report a problem or idea
+Press `Ctrl+O` on any screen (or find **Report a problem or idea** in the `Ctrl+P` palette).
+Choose bug / idea / question, write a title and what happened. AIForge opens GitHub's
+**New issue** page with everything filled in; check it and click **Submit** (a free GitHub
+account is needed, and nothing is sent before you submit). You choose what is attached:
+
+- versions and hardware (AIForge, Python, PyTorch, OS, GPU)
+- the error messages the app showed recently
+- the open model's layers (structure only, never your data or weights)
+- the crash details, if AIForge closed because of an error last time; it offers this at the next start
+
+Your home folder is shown as `~` in paths. The report is also copied to the clipboard and
+saved in `exports/issue-reports/`, in case no browser opens (e.g. over SSH).
+
 ---
 
 ## 4. Data
@@ -282,7 +296,7 @@ New to the words (epoch, loss, overfitting…)? Press `g` → **🎓 ML basics**
 | `g` | Guide | `?` | Full guide | | |
 | `w` `c` `r` `d` | Load weights · Duplicate · Rename · Delete | | | | |
 
-Everywhere: `Esc` back · `Tab` next · `Ctrl+P` command palette · `Ctrl+Q` quit.
+Everywhere: `Esc` back · `Tab` next · `Ctrl+P` command palette · `Ctrl+T` dark / light · `Ctrl+O` report a problem · `Ctrl+Q` quit.
 
 ---
 
@@ -299,6 +313,7 @@ Everywhere: `Esc` back · `Tab` next · `Ctrl+P` command palette · `Ctrl+Q` qui
 | GPU "none found" | NVIDIA: install the CUDA build of PyTorch from [pytorch.org](https://pytorch.org/get-started/locally/) |
 | A dataset download fails | Check your internet and try again; partial files are removed automatically |
 | Predictions look random | Make sure the model shows *trained* and check its validation accuracy |
+| Something else is broken | Press `Ctrl+O` to report it on GitHub, with the details filled in |
 
 ---
 
