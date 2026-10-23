@@ -63,6 +63,11 @@ def fit_spec_to_data(spec: ModelSpec, info: DataInfo) -> list[str]:
             changes.append(f"classes → {len(info.class_names)} ({', '.join(info.class_names[:5])}"
                            f"{'…' if len(info.class_names) > 5 else ''})")
         spec.class_names = list(info.class_names)
+    if info.task == "language_model":
+        emb = next((l for l in spec.layers if l.type == "Embedding"), None)
+        if emb and emb.config["num_embeddings"] != info.n_outputs:
+            changes.append(f"vocabulary {emb.config['num_embeddings']} → {info.n_outputs} tokens")
+            emb.config["num_embeddings"] = info.n_outputs
     head = next((l for l in reversed(spec.layers) if l.type == "Linear"), None)
     if head and head.config["out_features"] != info.n_outputs:
         changes.append(f"output layer {head.config['out_features']} → {info.n_outputs} units")
@@ -77,11 +82,19 @@ def data_mismatch(spec: ModelSpec, info: DataInfo) -> list[str]:
     if spec.input_dtype != info.input_dtype:
         probs.append(f"Model input type is '{spec.input_dtype}' but data is '{info.input_dtype}'")
     out = spec.output_shape()
-    if out is not None and out != (info.n_outputs,):
-        probs.append(f"Model outputs {out} but the data needs ({info.n_outputs},)")
+    if out is not None and out != info.output_shape:
+        probs.append(f"Model outputs {out} but the data needs {info.output_shape}")
     if spec.task != info.task:
         probs.append(f"Model task is {spec.task} but data is {info.task}")
+    vocab = spec.vocab_size()
+    if info.task == "language_model" and vocab is not None and vocab != info.n_outputs:
+        probs.append(f"The Embedding knows {vocab} tokens but the text's vocabulary has {info.n_outputs}")
     return probs
+
+
+def lm_loss(out, y, loss_fn):
+    """Cross-entropy over every position: (batch, seq, vocab) vs (batch, seq)."""
+    return loss_fn(out.reshape(-1, out.shape[-1]), y.reshape(-1))
 
 
 class Trainer:
@@ -90,11 +103,13 @@ class Trainer:
     def __init__(self, spec: ModelSpec, model: nn.Module, train_ds, val_ds, cfg: TrainConfig,
                  on_log: Callable[[str], None] = print,
                  on_batch: Callable[[int, int, int, float], None] | None = None,
-                 on_epoch: Callable[[dict], None] | None = None, target_std: float = 1.0):
+                 on_epoch: Callable[[dict], None] | None = None, target_std: float = 1.0,
+                 preprocess: dict | None = None):
         self.spec, self.model, self.cfg = spec, model, cfg
         self.train_ds, self.val_ds = train_ds, val_ds
         self.on_log, self.on_batch, self.on_epoch = on_log, on_batch, on_epoch
         self.target_std = target_std  # report regression error in the original units
+        self.preprocess = preprocess or {}  # language models: vocabulary, for the sample text
         self._stop = threading.Event()
         self.best_state: dict | None = None
         self.epochs: list[dict] = []
@@ -107,7 +122,7 @@ class Trainer:
         return self._stop.is_set()
 
     def _loss_fn(self):
-        return nn.CrossEntropyLoss() if self.spec.task == "classification" else nn.MSELoss()
+        return nn.MSELoss() if self.spec.task == "regression" else nn.CrossEntropyLoss()
 
     def _optimizer(self):
         params = [p for p in self.model.parameters() if p.requires_grad]
@@ -147,6 +162,7 @@ class Trainer:
                     f"{len(self.train_ds):,} train / {len(self.val_ds):,} val samples")
         best, bad, started = math.inf, 0, time.time()
         steps = len(train_dl)
+        lm = self.spec.task == "language_model"
         for epoch in range(1, c.epochs + 1):
             self._set_train_mode()
             run_loss, run_correct, seen = 0.0, 0, 0
@@ -156,15 +172,22 @@ class Trainer:
                     break
                 x, y = x.to(dev), y.to(dev)
                 out = self.model(x)
-                loss = loss_fn(out, y.float() if self.spec.task == "regression" else y)
+                if lm:
+                    loss = lm_loss(out, y, loss_fn)
+                else:
+                    loss = loss_fn(out, y.float() if self.spec.task == "regression" else y)
                 opt.zero_grad(set_to_none=True)
                 loss.backward()
+                if lm:  # deep Transformers trained from scratch can take the odd huge step
+                    nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
                 opt.step()
                 n = x.shape[0]
                 run_loss += loss.item() * n
                 seen += n
                 if self.spec.task == "classification":
                     run_correct += (out.argmax(1) == y).sum().item()
+                elif lm:
+                    run_correct += (out.argmax(-1) == y).float().mean(1).sum().item()
                 if self.on_batch and (step % max(1, steps // 50) == 0 or step == steps):
                     self.on_batch(epoch, step, steps, run_loss / seen)
             if self.stopped and seen == 0:
@@ -175,8 +198,16 @@ class Trainer:
                    "lr": opt.param_groups[0]["lr"], "seconds": round(time.time() - t0, 2)}
             if self.spec.task == "classification":
                 rec["train_acc"] = run_correct / max(1, seen)
+            elif lm:
+                rec["train_token_acc"] = run_correct / max(1, seen)
+                rec["train_ppl"] = perplexity(rec["train_loss"])
             if val_dl:
                 rec.update(evaluate(self.model, val_dl, self.spec.task, dev, loss_fn, self.target_std))
+            if lm and self.preprocess.get("vocab"):
+                from .textgen import generate
+
+                # A short sample after every epoch shows the model learning to write.
+                rec["sample"] = generate(self.model, self.preprocess, length=160, temperature=0.8)
             self.epochs.append(rec)
             if self.on_epoch:
                 self.on_epoch(rec)
@@ -206,23 +237,35 @@ class Trainer:
         }
 
 
+def perplexity(loss: float) -> float:
+    """exp(cross-entropy): roughly how many tokens the model is still choosing between."""
+    return math.exp(min(loss, 50.0))
+
+
 @torch.no_grad()
 def evaluate(model: nn.Module, loader, task: str, dev, loss_fn=None, target_std: float = 1.0) -> dict:
     model.eval()
-    loss_fn = loss_fn or (nn.CrossEntropyLoss() if task == "classification" else nn.MSELoss())
+    loss_fn = loss_fn or (nn.MSELoss() if task == "regression" else nn.CrossEntropyLoss())
     tot, correct, n, abs_err = 0.0, 0, 0, 0.0
     for x, y in loader:
         x, y = x.to(dev), y.to(dev)
         out = model(x)
-        tot += loss_fn(out, y.float() if task == "regression" else y).item() * x.shape[0]
+        if task == "language_model":
+            tot += lm_loss(out, y, loss_fn).item() * x.shape[0]
+            correct += (out.argmax(-1) == y).float().mean(1).sum().item()
+        else:
+            tot += loss_fn(out, y.float() if task == "regression" else y).item() * x.shape[0]
         n += x.shape[0]
         if task == "classification":
             correct += (out.argmax(1) == y).sum().item()
-        else:
+        elif task == "regression":
             abs_err += (out - y).abs().sum().item()
     res = {"val_loss": tot / max(1, n)}
     if task == "classification":
         res["val_acc"] = correct / max(1, n)
+    elif task == "language_model":
+        res["val_token_acc"] = correct / max(1, n)
+        res["val_ppl"] = perplexity(res["val_loss"])
     else:
         res["val_mae"] = abs_err / max(1, n * (y.shape[1] if y.dim() > 1 else 1)) * target_std
     return res
