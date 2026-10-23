@@ -25,6 +25,8 @@ Find out how good the model **really** is, on examples it never trained on.
 - **Classification:** accuracy, balanced accuracy, precision / recall / F1 per class,
   ROC-AUC, PR-AUC, the confusion matrix, log loss and calibration
 - **Regression:** MAE, RMSE, MSE, R², MAPE, median and largest error
+- **Language models:** perplexity, next-token accuracy, the hardest tokens and samples of
+  what it writes
 - A **baseline** (always guessing the most common class / the average) to compare with
 - **95% confidence intervals**, so you know how much to trust the numbers
 - **Error analysis:** the model's worst mistakes, to look for patterns
@@ -121,6 +123,8 @@ class EvaluateScreen(Screen):
         lines = []
         for h in hist[-5:][::-1]:
             score = (f"acc {h['accuracy']:.1%} · F1 {h['macro_f1']:.3f}" if "accuracy" in h else
+                     f"perplexity {h['perplexity']:.2f} · next-token acc {h['token_accuracy']:.1%}"
+                     if "perplexity" in h else
                      f"MAE {h['mae']:.4g} · R² {h['r2']:.3f}" if h.get("r2") is not None else f"MAE {h['mae']:.4g}")
             lines.append(f"{h['date']}  {score}")
         self.query_one("#eval-history", Static).update(
@@ -133,10 +137,13 @@ class EvaluateScreen(Screen):
         file = self.query_one("#eval-source", Select).value == "file"
         self.query_one("#grp-eval-file").display = file
         image = self.kind == "image" or (self.kind is None and len(self.spec.input_shape) == 3)
+        lm = self.spec.task == "language_model"
         self.query_one("#eval-path-label", Label).update(
-            "Folder  [dim](one sub-folder per class)[/]" if image else "CSV file  [dim](with the true answers)[/]")
-        self.query_one("#eval-path", Input).placeholder = "~/data/test_photos/" if image else "~/data/test.csv"
-        self.query_one("#grp-eval-target").display = not image
+            "Folder  [dim](one sub-folder per class)[/]" if image else
+            "Text file  [dim](.txt the model hasn't seen)[/]" if lm else "CSV file  [dim](with the true answers)[/]")
+        self.query_one("#eval-path", Input).placeholder = \
+            "~/data/test_photos/" if image else "~/data/other_book.txt" if lm else "~/data/test.csv"
+        self.query_one("#grp-eval-target").display = not image and not lm
         self.query_one("#grp-eval-text").display = self.kind == "text"
         self._refresh_columns()
 
@@ -158,6 +165,9 @@ class EvaluateScreen(Screen):
         if self.kind == "image" or (self.kind is None and len(self.spec.input_shape) == 3):
             dlg = FileBrowser("Choose a test image folder", mode="dir", start=current,
                               hint="A folder with one sub-folder per class, named like the model's classes.")
+        elif self.spec.task == "language_model":
+            dlg = FileBrowser("Choose a test text file", mode="file", extensions=datamod.TEXT_EXT, start=current,
+                              hint="A plain-text file in the same style (and language) as the training text.")
         else:
             dlg = FileBrowser("Choose a test CSV file", mode="file", extensions=CSV_EXT, start=current,
                               hint="Same columns as the training data, including the true answers.")

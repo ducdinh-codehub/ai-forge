@@ -43,7 +43,7 @@ class HubDataset:
     samples: str
     task: str  # what the model learns
     templates: list[str]
-    format: str  # "csv" | "csv_text" | "image_folder" | a torchvision source
+    format: str  # "csv" | "csv_text" | "image_folder" | "text_corpus" | a torchvision source
     target: str | None = None
     text_column: str | None = None
     task_kind: str | None = None  # force "classification"/"regression" for CSV tables
@@ -326,13 +326,26 @@ def _ag_news(dest, progress, cancel):
 
 
 # ---------------------------------------------------------------------------
+# Plain text (language models)
+# ---------------------------------------------------------------------------
+
+
+def _tiny_shakespeare(dest, progress, cancel):
+    out = _download("https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt",
+                    dest / "tiny_shakespeare.txt", progress, cancel)
+    _check_count(len(out.read_text(encoding="utf-8")), 1_115_394, "characters")
+    return "tiny_shakespeare.txt"
+
+
+# ---------------------------------------------------------------------------
 # Catalog
 # ---------------------------------------------------------------------------
 
 TABULAR = "📊 Tabular data (CSV)"
 VISION = "🖼 Computer vision (images)"
-TEXT = "💬 Language / NLP (text)"
-GROUPS = [TABULAR, VISION, TEXT]
+TEXT = "💬 Text classification (NLP)"
+LANGUAGE_MODEL = "🧠 Language model (generate text)"
+GROUPS = [TABULAR, VISION, TEXT, LANGUAGE_MODEL]
 
 _MLP_C, _MLP_R = "MLP classifier (tabular)", "MLP regressor (tabular)"
 _TEXT_T = ["Text Transformer classifier", "Text classifier (bidirectional GRU)",
@@ -453,6 +466,17 @@ CATALOG: list[HubDataset] = [
                _TEXT_T + ["BERT-style Transformer (deeper encoder)"],
                "csv_text", target="label", text_column="text", fetch=_ag_news,
                notes="A large topic-classification benchmark. Small models reach ~88-91%."),
+    # --- language models ---
+    HubDataset("tiny_shakespeare", LANGUAGE_MODEL, "Tiny Shakespeare",
+               "40,000 lines from Shakespeare's plays in one text file. The classic first dataset for "
+               "a character-level language model: watch it learn to write dialogue in old English.",
+               "Andrej Karpathy's char-rnn project (text from Project Gutenberg)",
+               "https://github.com/karpathy/char-rnn", "Public domain (the plays); MIT (the repository)",
+               "1.1 MB", "1,115,394 characters · 65 different characters", "language model (next character)",
+               ["Tiny GPT (characters, fast)", "LSTM language model (characters)"], "text_corpus",
+               fetch=_tiny_shakespeare,
+               notes="On a laptop CPU an epoch takes a minute or two. After ~5 epochs the samples look like "
+                     "a play (names, line breaks); a validation perplexity around 4-5 is good."),
 ]
 BY_KEY = {d.key: d for d in CATALOG}
 
