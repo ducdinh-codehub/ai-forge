@@ -62,6 +62,12 @@ def explain(spec: ModelSpec, info: DataInfo | None) -> str:
                    "quickest fix.")
         return md
     out = infos[-1].out_shape if infos else None
+    if info is not None and info.task == "language_model":
+        probs = problems(spec, info)
+        return (f"{probs[0].rstrip('.') + '.' if probs else 'No problems found.'}{data}\n\n"
+                "A language model needs token ids "
+                "in and **one score per vocabulary token at every position** out, so it can guess the "
+                "next token everywhere at once. The language-model templates are built that way.")
     if out is not None and len(out) > 1:
         first_multi = next((i for i in infos if i.spec.type == "Linear" and len(i.in_shape) > 1), None)
         md = (f"The model's last layer outputs shape **{out}**, but it must output a flat list of "
@@ -79,6 +85,8 @@ def explain(spec: ModelSpec, info: DataInfo | None) -> str:
 
 def _describe(info: DataInfo) -> str:
     s = info.input_shape
+    if info.task == "language_model":
+        return f"plain text, read {s[0]} tokens at a time to predict the next one"
     if info.input_dtype == "long":
         return f"text ({s[0]} tokens per example)"
     if len(s) == 3:
@@ -173,6 +181,9 @@ def suggest(spec: ModelSpec, info: DataInfo) -> list[Fix]:
 
 def _templates_for(info: DataInfo) -> list[tuple[str, str]]:
     s = info.input_shape
+    if info.task == "language_model":
+        return [("Tiny GPT (characters, fast)", "A small GPT: a causal Transformer that learns to write."),
+                ("LSTM language model (characters)", "Reads the text in order with a memory; simpler.")]
     if info.input_dtype == "long":
         return [("Text Transformer classifier", "Reads text with self-attention."),
                 ("Text classifier (Embedding + LSTM)", "Reads text word by word; lighter and faster.")]

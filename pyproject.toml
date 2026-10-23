@@ -63,4 +63,4 @@ include = ["aiforge*"]
 
 [tool.setuptools.package-data]
 "aiforge.tui" = ["*.tcss"]
-"aiforge" = ["examples/*.csv", "examples/**/*.png"]
+"aiforge" = ["examples/*.csv", "examples/*.txt", "examples/**/*.png"]

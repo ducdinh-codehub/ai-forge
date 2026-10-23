@@ -358,6 +358,10 @@ def describe_input(spec: ModelSpec) -> str:
 
 
 def describe_task(spec: ModelSpec, out) -> str:
+    if spec.task == "language_model":
+        n = out[-1] if out else "?"
+        return (f"**predicts the next token** at every position, choosing among **{n} tokens** - "
+                "a language model that writes text one token at a time")
     if spec.task == "classification":
         n = out[0] if out else "?"
         names = f" ({', '.join(spec.class_names[:6])}{'…' if len(spec.class_names) > 6 else ''})" \
@@ -375,6 +379,9 @@ def role(info: LayerInfo, spec: ModelSpec) -> str:
         return f"⚠ {info.error}"
     last = info.index == len(spec.layers) - 1
     if t == "Linear":
+        if last and spec.task == "language_model":
+            return (f"turns each position's {i[-1]} features into **a score for every one of the "
+                    f"{o[-1]} tokens**: how likely each one is to come next")
         if last and spec.task == "classification":
             return f"turns {i[-1]} features into **one score per class** ({o[-1]} scores)"
         if last:
@@ -409,6 +416,9 @@ def role(info: LayerInfo, spec: ModelSpec) -> str:
     if t == "PositionalEncoding":
         return f"stamps each of the {i[0]} positions with its location"
     if t == "TransformerEncoder":
+        if c["causal"]:
+            return (f"lets each of the {i[0]} positions look at the positions **before** it "
+                    f"({c['num_layers']} layers × {c['num_heads']} heads)")
         return (f"lets each of the {i[0]} positions look at all the others "
                 f"({c['num_layers']} layers × {c['num_heads']} heads)")
     if t == "SequencePool":
@@ -440,9 +450,20 @@ def review(spec: ModelSpec) -> list[str]:
             last_linear = idx
         elif t in nonlinear:
             last_linear = None
+    if spec.task == "language_model":
+        peeking = [l for l in spec.layers if (l.type == "TransformerEncoder" and not l.config["causal"])
+                   or (l.type in ("LSTM", "GRU") and l.config["bidirectional"])]
+        for l in peeking:
+            what = "causal is off" if l.type == "TransformerEncoder" else "bidirectional is on"
+            notes.append(f"❌ **Layer {spec.layers.index(l) + 1} ({l.type})**: {what}, so while training "
+                         "each position can see the token it has to predict. The model learns to copy "
+                         "the answer and writes nonsense afterwards. "
+                         + ("Turn **causal** on." if l.type == "TransformerEncoder" else
+                            "Turn **bidirectional** off."))
     if types and types[-1] in ACTIVATIONS:
-        if spec.task == "classification":
-            notes.append(f"⚠️ The model ends with **{types[-1]}**. For classification, end with a "
+        if spec.task in ("classification", "language_model"):
+            kind = "a language model" if spec.task == "language_model" else "classification"
+            notes.append(f"⚠️ The model ends with **{types[-1]}**. For {kind}, end with a "
                          "Linear layer - the loss function turns its scores into probabilities.")
         elif types[-1] in ("ReLU", "Sigmoid", "Tanh"):
             notes.append(f"⚠️ The model ends with **{types[-1]}**, which limits the range of "
@@ -566,7 +587,17 @@ def model_markdown(spec: ModelSpec) -> str:
             md.append(f"- **Layer {i.index + 1} {i.spec.type}**: {i.params:,} ({i.params / total:.0%}) `{bar}`")
 
     md += ["", "## How it learns"]
-    if spec.task == "classification":
+    if spec.task == "language_model":
+        md += ["The model reads a stretch of text and, **at every position, guesses the next token** "
+               "(a character or a word). The answer is simply the text itself shifted by one, so any "
+               "text can be training data - no labels needed. The **cross-entropy loss** measures how "
+               "much probability it gave to the real next token; training makes that loss smaller.", "",
+               "**Perplexity** = e^loss: roughly how many tokens it is still choosing between. A model "
+               "that guesses at random scores the vocabulary size; lower is better.", "",
+               "To **write**, the model picks a next token, appends it, and repeats. *Temperature* "
+               "controls how adventurous the picks are. This is how ChatGPT and Claude write too - "
+               "with billions of parameters and far more text."]
+    elif spec.task == "classification":
         md += ["The last layer outputs one **score** per class. During training, *softmax* turns the "
                "scores into probabilities and the **cross-entropy loss** measures how much probability "
                "the model gave to the correct class (`loss = −log(p_correct)`). Training nudges every "
@@ -696,6 +727,8 @@ def training_settings_markdown(spec: ModelSpec, values: dict, n_train: int | Non
                   f"**{frozen_params:,}** are frozen (they keep what the model already learned).")
     md.append("Loss function: " + ("**cross-entropy** - rewards giving high probability to the correct class."
                                    if spec.task == "classification" else
+                                   "**cross-entropy over every position** - rewards giving high probability "
+                                   "to the real next token." if spec.task == "language_model" else
                                    "**mean squared error** - the average squared distance to the true number."))
     return "\n".join(md)
 
@@ -736,6 +769,15 @@ def diagnose(train_loss: list[float], val_loss: list[float], val_metric: list[fl
             elif v[-1] > 1.5 * train_loss[-1] and v[-1] > 0.05:
                 notes.append("💡 Validation loss is clearly higher than training loss - the model does "
                              "better on examples it has seen. Mild overfitting; more data or Dropout helps.")
+    if task == "language_model" and val_metric and n_classes:
+        ppl = val_metric[-1]
+        if n >= 3 and ppl > n_classes * 0.5:
+            notes.append(f"⚠️ Validation perplexity ({ppl:.1f}) is close to guessing at random among "
+                         f"{n_classes} tokens - the model isn't learning yet.")
+        else:
+            notes.append(f"Validation perplexity is **{ppl:.2f}**: the model is choosing between about "
+                         f"{max(1, round(ppl))} token{'s' if round(ppl) != 1 else ''} at each step "
+                         f"(random guessing: {n_classes}). Read the samples in the log to judge the text.")
     if task == "classification" and val_metric and n_classes:
         acc, chance = val_metric[-1], 1 / n_classes
         if n >= 3 and acc < chance * 1.3:
@@ -758,6 +800,8 @@ def charts_markdown(train_loss, val_loss, val_metric, task: str, n_classes: int)
            "measured on the examples it learns from, the *val* line on examples it never sees.", "",
            ("**Accuracy** (right) is the share of correct answers on each set - higher is better."
             if task == "classification" else
+            "**Perplexity** (right) is roughly how many tokens the model is still choosing between at "
+            "each step - lower is better. It falls fast at first, then slowly." if task == "language_model" else
             "**Mean absolute error** (right) is the average size of the mistake, in the units of "
             "your target - lower is better."), "",
            "## Common patterns",
