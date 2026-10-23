@@ -24,6 +24,7 @@ SOURCES = {
     "cifar100": "CIFAR-100 objects, 100 classes (auto-download, 32×32×3)",
 }
 SYNTHETIC = ["moons", "spirals", "circles", "blobs", "regression"]
+FILE_SOURCES = ("csv", "csv_text", "image_folder", "text_corpus")  # need a path
 TORCHVISION = ("mnist", "fashion_mnist", "cifar10", "cifar100")
 IMAGE_EXT = {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp"}
 TEXT_EXT = {".txt", ".md", ".text"}
@@ -330,7 +331,10 @@ def _text_corpus(path: Path, tokenizer: str, spec, val_split: float):
         raise ValueError(f"{path.name} has only {len(ids):,} {tokenizer} tokens - it needs more than "
                          f"{seq_len} (the model's input length) for training. Use a longer text or a "
                          "shorter input length.")
-    train = TextWindows(train_ids, seq_len, seq_len // 2)  # overlapping: more examples per epoch
+    # Overlapping windows: a short text still gives ~2,000 examples per epoch, a long one starts a
+    # window every half input length.
+    stride = max(1, min(seq_len // 2, len(train_ids) // 2000))
+    train = TextWindows(train_ids, seq_len, stride)
     val = TextWindows(val_ids, seq_len, seq_len)
     unk = (ids == 0).float().mean().item()
     info = DataInfo([seq_len], "long", "language_model", [], {

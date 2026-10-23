@@ -19,7 +19,7 @@ from textual.widgets import Button, DirectoryTree, Input, Label, OptionList, Sta
 from textual.widgets.option_list import Option
 
 from .. import EXAMPLES_DIR
-from ..data import IMAGE_EXT
+from ..data import IMAGE_EXT, TEXT_EXT
 
 # Ready-made filters for the places that ask for a path.
 CSV_EXT = {".csv", ".tsv", ".txt"}
@@ -273,6 +273,8 @@ def preview(p: Path) -> Text | str:
         suffix = p.suffix.lower()
         head = f"[b]{p.name}[/b]\n[dim]{_human(p.stat().st_size)} · modified " \
                f"{time.strftime('%Y-%m-%d %H:%M', time.localtime(p.stat().st_mtime))}[/]\n\n"
+        if suffix in TEXT_EXT and (suffix != ".txt" or not _looks_tabular(p)):
+            return head + _preview_text(p)
         if suffix in CSV_EXT:
             return head + _preview_csv(p)
         if suffix in IMAGE_EXT:
@@ -364,6 +366,28 @@ def _preview_csv(p: Path) -> str:
     lines += ["", f"[dim]Last column '{header[-1]}' is the default target.[/]", "", "[b]First rows[/b]"]
     for r in data[:5]:
         lines.append(" " + ", ".join(v[:10] for v in r[:6])[:42])
+    return "\n".join(lines)
+
+
+def _looks_tabular(p: Path) -> bool:
+    """A .txt can be a table (tab/comma separated) or plain prose: every first line having the
+    same, non-zero number of separators means a table."""
+    with p.open(encoding="utf-8", errors="replace") as f:
+        lines = [l for l in (f.readline() for _ in range(8)) if l.strip()]
+    return any(len({l.count(sep) for l in lines}) == 1 and lines[0].count(sep) > 0
+               for sep in ("\t", ",", ";", "|")) if len(lines) >= 2 else False
+
+
+def _preview_text(p: Path) -> str:
+    from rich.markup import escape
+
+    with p.open(encoding="utf-8", errors="replace") as f:
+        sample = f.read(1200)
+    size = p.stat().st_size
+    words = len(sample.split()) * max(1, size // max(1, len(sample.encode())))
+    lines = [f"[green]Plain text · about {words:,} words[/]", "",
+             "[dim]For a language model: it learns to write text like this.[/]", "", "[b]Beginning[/b]"]
+    lines += [" " + escape(l[:42]) for l in sample.splitlines()[:16]]
     return "\n".join(lines)
 
 

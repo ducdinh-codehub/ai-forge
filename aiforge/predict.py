@@ -11,9 +11,23 @@ from .data import IMAGE_EXT, _read_csv, prepare_input
 from .spec import ModelSpec
 
 
+def show_token(token: str) -> str:
+    """Make whitespace tokens visible in a list of guesses."""
+    return {"\n": "↵ (new line)", " ": "␣ (space)", "\t": "⇥ (tab)"}.get(token, token)
+
+
 @torch.no_grad()
 def predict_one(spec: ModelSpec, model: nn.Module, raw: str, top_k: int = 5) -> list[tuple[str, float]]:
+    """Class probabilities, regression values, or (language models) the likeliest next tokens."""
     model.eval()
+    pre = spec.data.get("preprocess", {})
+    if spec.task == "language_model":
+        if pre.get("type") != "corpus":
+            raise ValueError("This language model has no vocabulary saved - train it in AIForge first.")
+        from .textgen import next_token_probs
+
+        vals, idx = next_token_probs(model, pre, raw).topk(min(top_k, len(pre["vocab"]) - 1))
+        return [(show_token(pre["vocab"][i]), float(v)) for v, i in zip(vals.tolist(), idx.tolist())]
     out = model(prepare_input(spec, raw))[0]
     if spec.task == "classification":
         probs = out.softmax(0)
@@ -21,7 +35,6 @@ def predict_one(spec: ModelSpec, model: nn.Module, raw: str, top_k: int = 5) -> 
         k = min(top_k, len(probs))
         vals, idx = probs.topk(k)
         return [(names[i], float(v)) for v, i in zip(vals.tolist(), idx.tolist())]
-    pre = spec.data.get("preprocess", {})
     out = out * pre.get("target_std", 1.0) + pre.get("target_mean", 0.0)
     return [(f"output {i}" if len(out) > 1 else "prediction", float(v)) for i, v in enumerate(out.tolist())]
 
@@ -33,6 +46,8 @@ def input_hint(spec: ModelSpec) -> str:
         return "Path to an image file (png/jpg)"
     if kind == "text":
         return "A sentence / paragraph of text"
+    if kind == "corpus" or spec.task == "language_model":
+        return "The start of a text (a prompt) - the model writes what comes next. Leave empty to let it begin."
     feats = pre.get("features")
     if feats:
         cats = pre.get("categorical", {})
@@ -44,6 +59,8 @@ def input_hint(spec: ModelSpec) -> str:
 
 def predict_batch(spec: ModelSpec, model: nn.Module, src: str, dst: str | None = None) -> tuple[Path, int]:
     """Predict every row of a CSV (tabular/text) or every image in a folder; write a CSV."""
+    if spec.task == "language_model":
+        raise ValueError("Batch prediction is for classifiers and regressors - a language model writes text.")
     p = Path(src.strip().strip("'\"")).expanduser()
     pre = spec.data.get("preprocess", {})
     rows_out: list[list[str]] = []

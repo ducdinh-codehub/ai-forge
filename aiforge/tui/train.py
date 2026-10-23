@@ -14,6 +14,7 @@ from textual.widgets.option_list import Option
 
 from .. import data as datamod
 from ..spec import safe_name
+from ..textgen import TOKENIZERS
 from .chart import LineChart
 from .resize import DEFAULT_FRACTION, MAX_FRACTION, MIN_FRACTION, ResizeHandle
 from .sysmon import SystemPanel
@@ -76,6 +77,11 @@ class TrainScreen(Screen):
                     yield Label("Toy dataset")
                     yield Select([(k, k) for k in datamod.SYNTHETIC], value="spirals", allow_blank=False,
                                  id="kind")
+                with Vertical(id="grp-corpus", classes="group"):
+                    yield Button("📜 Use the sample text (nursery rhymes)", id="sample-text")
+                    yield Label("Split the text into")
+                    yield Select([(v, k) for k, v in TOKENIZERS.items()], value="char", allow_blank=False,
+                                 id="tokenizer")
                 with Horizontal(classes="row"):
                     with Vertical():
                         yield Label("Validation split")
@@ -209,6 +215,10 @@ class TrainScreen(Screen):
 
     def _apply_previous_dataset(self) -> None:
         prev = self.spec.data.get("dataset_cfg")
+        if not prev and self.spec.task == "language_model":
+            # A new language model starts on the bundled sample text, ready to train.
+            prev = {"source": "text_corpus", "path": str(datamod.EXAMPLE_CORPUS),
+                    "tokenizer": self.spec.data.get("tokenizer", "char")}
         if not prev:
             return
         try:
@@ -217,6 +227,8 @@ class TrainScreen(Screen):
                 self.query_one("#path", Input).value = prev["path"]
             if prev.get("kind"):
                 self.query_one("#kind", Select).value = prev["kind"]
+            if prev.get("tokenizer"):
+                self.query_one("#tokenizer", Select).value = prev["tokenizer"]
         except Exception:  # noqa: BLE001
             pass
 
@@ -238,6 +250,8 @@ class TrainScreen(Screen):
             if cfg.get(key):
                 self.query_one(sel_id, Select).value = cfg[key]
         self.query_one("#task", Select).value = cfg.get("task") or "auto"
+        if cfg.get("tokenizer"):
+            self.query_one("#tokenizer", Select).value = cfg["tokenizer"]
         self._load_pressed()
 
     def _fill_freeze_list(self) -> None:
@@ -256,14 +270,23 @@ class TrainScreen(Screen):
 
     def _update_source_fields(self) -> None:
         src = self.query_one("#source", Select).value
-        self.query_one("#grp-path").display = src in ("csv", "csv_text", "image_folder")
+        self.query_one("#grp-path").display = src in datamod.FILE_SOURCES
         self.query_one("#grp-csv").display = src in ("csv", "csv_text")
         self.query_one("#grp-text").display = src == "csv_text"
         self.query_one("#grp-task").display = src == "csv"
         self.query_one("#grp-synth").display = src == "synthetic"
-        label = {"image_folder": "Folder  [dim](one sub-folder per class)[/]"}.get(src, "CSV file")
+        self.query_one("#grp-corpus").display = src == "text_corpus"
+        label = {"image_folder": "Folder  [dim](one sub-folder per class)[/]",
+                 "text_corpus": "Text file  [dim](.txt - the model learns to write like it)[/]"}.get(src, "CSV file")
         self.query_one("#path-label", Label).update(label)
+        self.query_one("#path", Input).placeholder = \
+            "~/data/book.txt" if src == "text_corpus" else "~/data/table.csv"
         self._refresh_columns()
+
+    @on(Button.Pressed, "#sample-text")
+    def _use_sample_text(self) -> None:
+        self.query_one("#path", Input).value = str(datamod.EXAMPLE_CORPUS)
+        self._load_pressed()
 
     @on(Input.Changed, "#path")
     def _refresh_columns(self) -> None:
@@ -288,6 +311,11 @@ class TrainScreen(Screen):
             dlg = FileBrowser("Choose an image folder", mode="dir", start=current or None,
                               hint="Pick the folder that contains one sub-folder per class "
                                    "(e.g. cat/, dog/). The preview shows how many images each class has.")
+        elif src == "text_corpus":
+            dlg = FileBrowser("Choose a text file", mode="file", extensions=datamod.TEXT_EXT,
+                              start=current or None,
+                              hint="Pick a plain-text file: a book, poems, song lyrics, code... More text "
+                                   "(at least ~1 MB) gives a better model.")
         else:
             dlg = FileBrowser("Choose a CSV file", mode="file", extensions=CSV_EXT, start=current or None,
                               hint="Pick a .csv file. The preview shows its columns and first rows.")
@@ -309,6 +337,7 @@ class TrainScreen(Screen):
             "text_column": val("#text_column"),
             "task": val("#task"),
             "kind": self.query_one("#kind", Select).value,
+            "tokenizer": self.query_one("#tokenizer", Select).value,
             "val_split": float(self.query_one("#val_split", Input).value or 0.2),
         }
 
@@ -321,7 +350,7 @@ class TrainScreen(Screen):
         except ValueError:
             self.notify("Validation split must be a number like 0.2", severity="error")
             return
-        if cfg["source"] in ("csv", "csv_text", "image_folder") and not cfg["path"]:
+        if cfg["source"] in datamod.FILE_SOURCES and not cfg["path"]:
             self.notify("Enter a path first.", severity="error")
             return
         self.query_one("#data-info", Static).update("[yellow]Loading data…[/] "
@@ -350,12 +379,21 @@ class TrainScreen(Screen):
         self._refresh_drawer("settings")
         classes = (f"{len(info.class_names)} classes: {', '.join(info.class_names[:8])}"
                    f"{'…' if len(info.class_names) > 8 else ''}") if info.class_names else "regression target"
+        if info.task == "language_model":
+            classes = f"predicts the next of {info.n_outputs:,} {info.preprocess['tokenizer']} tokens"
         used = f" (using {len(self.train_ds):,})" if n else ""
         self.query_one("#data-info", Static).update(
             f"[green]✓[/] {info.description}\n"
             f"   input {tuple(info.input_shape)} {info.input_dtype} · {info.task} · {classes}\n"
             f"   {len(tr):,} train{used} / {len(va):,} validation samples")
         self._check_mismatch()
+        tokens = getattr(tr, "tokens", None)
+        if info.task == "language_model" and tokens is not None and len(tokens) < 100_000:
+            self.query_one("#log", RichLog).write(
+                f"[yellow]💡 This text is short ({len(tokens):,} tokens).[/] The model will learn its shape - "
+                "line breaks, rhymes, common words - but not real sentences, and it starts memorizing "
+                "after a few epochs (AIForge keeps the best one). For real text, get [b]Tiny Shakespeare[/b] "
+                "(1 MB) from 🗄 Get a famous dataset: a few epochs already write recognisable words.")
         if self.finetune and self.spec.class_names and info.class_names != self.spec.class_names:
             self.query_one("#reset_head", Switch).value = True
 
@@ -530,9 +568,10 @@ class TrainScreen(Screen):
         log.write(f"[b]── {'Fine-tuning' if self.finetune else 'Training'} → '{save_as}' "
                   f"({note})[/b]")
         self.loss_hist, self.val_hist, self.metric_hist, self.train_metric_hist = [], [], [], []
-        is_cls = self.spec.task == "classification"
         chart = self.query_one("#chart-metric", LineChart)
-        chart.title, chart.fmt = ("Accuracy", "{:.0%}") if is_cls else ("Mean abs. error", "{:.3g}")
+        chart.title, chart.fmt = {"classification": ("Accuracy", "{:.0%}"),
+                                  "language_model": ("Perplexity", "{:.3g}")}.get(
+            self.spec.task, ("Mean abs. error", "{:.3g}"))
         self.query_one("#chart-loss", LineChart).set_data([], [])
         chart.set_data([], [])
         self.query_one("#start", Button).disabled = True
@@ -545,7 +584,7 @@ class TrainScreen(Screen):
             on_log=lambda m: call(log.write, m),
             on_batch=lambda e, s, n, l: call(self._on_batch, e, s, n, l, cfg.epochs),
             on_epoch=lambda r: call(self._on_epoch, r),
-            target_std=self.info.preprocess.get("target_std", 1.0))
+            target_std=self.info.preprocess.get("target_std", 1.0), preprocess=self.info.preprocess)
         self._run(save_as, model)
 
     def _on_batch(self, epoch, step, steps, loss, epochs) -> None:
@@ -561,6 +600,9 @@ class TrainScreen(Screen):
         if "train_acc" in r:
             self.train_metric_hist.append(r["train_acc"])
             parts.append(f"acc {r['train_acc']:.1%}")
+        if "train_ppl" in r:
+            self.train_metric_hist.append(r["train_ppl"])
+            parts.append(f"ppl {r['train_ppl']:.2f}")
         if "val_loss" in r:
             self.val_hist.append(r["val_loss"])
             parts.append(f"│ val loss {r['val_loss']:.4f}")
@@ -570,11 +612,19 @@ class TrainScreen(Screen):
         elif "val_mae" in r:
             self.metric_hist.append(r["val_mae"])
             parts.append(f"val MAE [b]{r['val_mae']:.4g}[/b]")
+        elif "val_ppl" in r:
+            self.metric_hist.append(r["val_ppl"])
+            parts.append(f"val ppl [b]{r['val_ppl']:.2f}[/b]")
         self._refresh_drawer("charts")
         self.query_one("#chart-loss", LineChart).set_data(self.loss_hist, self.val_hist)
         self.query_one("#chart-metric", LineChart).set_data(self.train_metric_hist, self.metric_hist)
         parts.append(f"[dim]{r['seconds']}s[/]")
-        self.query_one("#log", RichLog).write("  ".join(parts))
+        log = self.query_one("#log", RichLog)
+        log.write("  ".join(parts))
+        if r.get("sample"):
+            from rich.markup import escape
+
+            log.write(f"[dim]  ✎ sample:[/] [italic]{escape(r['sample'].strip())}[/]")
 
     @work(thread=True, exclusive=True, group="train")
     def _run(self, save_as: str, model) -> None:
@@ -614,7 +664,8 @@ class TrainScreen(Screen):
         self.ws.append_history(save_as, run)
         last = run["epochs"][-1]
         metric = (f", val acc {last['val_acc']:.1%}" if "val_acc" in last else
-                  f", val MAE {last['val_mae']:.4g}" if "val_mae" in last else "")
+                  f", val MAE {last['val_mae']:.4g}" if "val_mae" in last else
+                  f", val perplexity {last['val_ppl']:.2f}" if "val_ppl" in last else "")
         msg = f"Saved '{save_as}' (best weights, {len(run['epochs'])} epochs{metric})"
         log.write(f"[green]✓ {msg}[/]")
         self.notify(msg)
@@ -719,7 +770,8 @@ class TrainScreen(Screen):
         self._topic = topic
         if topic == "charts":
             text = charts_markdown(self.loss_hist, self.val_hist, self.metric_hist, self.spec.task,
-                                   len(self.spec.class_names))
+                                   self.spec.vocab_size() if self.spec.task == "language_model"
+                                   else len(self.spec.class_names))
         elif topic == "settings":
             text = training_settings_markdown(self.spec, self._raw_settings(),
                                               len(self.train_ds) if self.train_ds is not None else None,
