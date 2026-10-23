@@ -16,6 +16,7 @@ SOURCES = {
     "synthetic": "Synthetic toy data (no files needed)",
     "csv": "CSV table - numeric/categorical columns + a target column",
     "csv_text": "CSV with a text column + label column (text classification)",
+    "text_corpus": "Plain text file (.txt) - language model / text generation",
     "image_folder": "Image folder - one sub-folder per class",
     "mnist": "MNIST handwritten digits (auto-download, 28×28×1)",
     "fashion_mnist": "Fashion-MNIST clothing (auto-download, 28×28×1)",
@@ -25,6 +26,8 @@ SOURCES = {
 SYNTHETIC = ["moons", "spirals", "circles", "blobs", "regression"]
 TORCHVISION = ("mnist", "fashion_mnist", "cifar10", "cifar100")
 IMAGE_EXT = {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp"}
+TEXT_EXT = {".txt", ".md", ".text"}
+EXAMPLE_CORPUS = Path(__file__).parent / "examples" / "nursery_rhymes.txt"
 
 
 @dataclass
@@ -40,7 +43,17 @@ class DataInfo:
 
     @property
     def n_outputs(self) -> int:
+        if self.task == "language_model":
+            return len(self.preprocess["vocab"])
         return len(self.class_names) if self.task == "classification" else 1
+
+    @property
+    def output_shape(self) -> tuple[int, ...]:
+        """What the model must output: one score per vocabulary token at every position for a
+        language model, else one flat vector."""
+        if self.task == "language_model":
+            return (self.input_shape[0], self.n_outputs)
+        return (self.n_outputs,)
 
 
 def load(cfg: dict, data_dir: Path, spec=None) -> tuple[Dataset, Dataset, DataInfo]:
@@ -59,6 +72,8 @@ def load(cfg: dict, data_dir: Path, spec=None) -> tuple[Dataset, Dataset, DataIn
                              prev.get("vocab") if prev.get("type") == "text" else None)
     elif src == "image_folder":
         ds, info = _image_folder(Path(cfg["path"]).expanduser(), spec)
+    elif src == "text_corpus":
+        return _text_corpus(Path(cfg["path"]).expanduser(), cfg.get("tokenizer") or "char", spec, val_split)
     elif src in TORCHVISION:
         return _torchvision(src, data_dir, spec)
     else:
@@ -70,12 +85,12 @@ def load(cfg: dict, data_dir: Path, spec=None) -> tuple[Dataset, Dataset, DataIn
     return train, val, info
 
 
-def _vocab_size(spec) -> int:
+def _vocab_size(spec, default: int = 20000) -> int:
     if spec:
         for l in spec.layers:
             if l.type == "Embedding":
                 return int(l.config["num_embeddings"])
-    return 20000
+    return default
 
 
 # ---------------------------------------------------------------------------
@@ -259,6 +274,74 @@ def _csv_text(path: Path, target: str | None, text_col: str | None, seq_len: int
 
 
 # ---------------------------------------------------------------------------
+# Plain text (language models)
+# ---------------------------------------------------------------------------
+
+
+class TextWindows(Dataset):
+    """Slices of a token stream: x = tokens[i : i+L], y = tokens[i+1 : i+L+1] (the next token at
+    every position)."""
+
+    def __init__(self, tokens: torch.Tensor, seq_len: int, stride: int):
+        self.tokens, self.seq_len = tokens, seq_len
+        self.stride = max(1, stride)
+
+    def __len__(self):
+        return max(0, (len(self.tokens) - self.seq_len - 1) // self.stride + 1)
+
+    def __getitem__(self, i):
+        s = i * self.stride
+        chunk = self.tokens[s: s + self.seq_len + 1]
+        return chunk[:-1], chunk[1:]
+
+
+def read_text(path: Path) -> str:
+    if not path.is_file():
+        raise FileNotFoundError(f"File not found: {path}")
+    text = path.read_text(encoding="utf-8", errors="replace").replace("\r\n", "\n")
+    if not text.strip():
+        raise ValueError(f"{path.name} is empty")
+    return text
+
+
+def _text_corpus(path: Path, tokenizer: str, spec, val_split: float):
+    from . import textgen
+
+    if tokenizer not in textgen.TOKENIZERS:
+        raise ValueError(f"Unknown tokenizer '{tokenizer}' (use char or word)")
+    seq_len = int(spec.input_shape[0]) if spec and spec.input_dtype == "long" and len(spec.input_shape) == 1 \
+        else 64
+    tokens = textgen.split(read_text(path), tokenizer)
+    prev = spec.data.get("preprocess", {}) if spec else {}
+    if prev.get("type") == "corpus" and prev.get("tokenizer") == tokenizer:
+        vocab = prev["vocab"]  # keep the vocabulary when continuing/fine-tuning: ids must not move
+    else:
+        # Every character gets an id; for words the Embedding size caps the vocabulary.
+        size = _vocab_size(spec, 8000) if tokenizer == "word" else textgen.MAX_CHARS
+        vocab = textgen.build_vocab(tokens, tokenizer, size)
+    index = {t: i for i, t in enumerate(vocab)}
+    ids = torch.tensor([index.get(t, 0) for t in tokens], dtype=torch.long)
+    # Split the text itself (not overlapping windows) so validation text is never seen in training.
+    n_val = int(len(ids) * val_split) if val_split > 0 else 0
+    if n_val and n_val < seq_len + 1:
+        n_val = min(len(ids) // 2, seq_len + 1)
+    train_ids, val_ids = (ids[:-n_val], ids[-n_val:]) if n_val else (ids, ids[:0])
+    if len(train_ids) < seq_len + 1:
+        raise ValueError(f"{path.name} has only {len(ids):,} {tokenizer} tokens - it needs more than "
+                         f"{seq_len} (the model's input length) for training. Use a longer text or a "
+                         "shorter input length.")
+    train = TextWindows(train_ids, seq_len, seq_len // 2)  # overlapping: more examples per epoch
+    val = TextWindows(val_ids, seq_len, seq_len)
+    unk = (ids == 0).float().mean().item()
+    info = DataInfo([seq_len], "long", "language_model", [], {
+        "type": "corpus", "tokenizer": tokenizer, "vocab": vocab, "seq_len": seq_len},
+        n_train=len(train), n_val=len(val),
+        description=f"{path.name}: {len(ids):,} {tokenizer} tokens, vocabulary {len(vocab):,}"
+                    + (f" ({unk:.1%} unknown)" if unk >= 0.005 else ""))
+    return train, val, info
+
+
+# ---------------------------------------------------------------------------
 # Images
 # ---------------------------------------------------------------------------
 
@@ -363,6 +446,10 @@ def prepare_input(spec, raw: str) -> torch.Tensor:
             return _image_transform(pre)(im).unsqueeze(0)
     if kind == "text":
         return torch.tensor([encode_text(raw, pre["vocab"], pre["seq_len"])])
+    if kind == "corpus":
+        from .textgen import _context, encode
+
+        return torch.tensor([_context(pre, encode(raw, pre["vocab"], pre["tokenizer"]))])
     # tabular / generic numbers
     parts = [v.strip() for v in re.split(r"[,\s;]+", raw.strip()) if v.strip()]
     feats = pre.get("features")
