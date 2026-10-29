@@ -32,6 +32,13 @@ def test_serve_dialog_starts_and_stops(tmp_path):
             info = await asyncio.to_thread(
                 lambda: json.load(urllib.request.urlopen(f"http://127.0.0.1:{PORT}/info")))
             assert info["model"] == "spiral"
+            opened = []
+            app.open_url = lambda url, **kw: opened.append(url)
+            status = dialog.query_one("#status")
+            await pilot.click(offset=(status.region.x + 16, status.region.y))  # on the address
+            await pilot.click(offset=(status.region.x + 14, status.region.y + 1))  # on the docs link
+            await pilot.pause(0.1)
+            assert opened == [f"http://localhost:{PORT}", f"http://localhost:{PORT}/docs"]
             await pilot.press("escape")
             await pilot.pause(0.2)
             assert app.screen is not dialog

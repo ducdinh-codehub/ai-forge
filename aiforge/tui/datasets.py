@@ -27,7 +27,6 @@ class DatasetScreen(Screen):
     """Dismisses with the Train-screen data settings of the chosen dataset, or None."""
 
     BINDINGS = [Binding("escape,q", "back", "Back"),
-                Binding("enter", "primary", "Download / use", show=False),
                 Binding("left,h", "focus_list", "List", show=False),
                 Binding("right,l", "focus_text", "Read", show=False)]
 
@@ -100,7 +99,13 @@ class DatasetScreen(Screen):
 
     @on(OptionList.OptionSelected, "#hub-list")
     def _selected(self) -> None:
-        self.action_primary()
+        # Picking a name only gets the button ready: some datasets are hundreds of MB, so a
+        # download always starts from the button itself.
+        for bid in ("download", "use", "remove"):
+            button = self.query_one(f"#{bid}", Button)
+            if button.display:
+                button.focus()
+                return
 
     def _show(self) -> None:
         d = self.current
@@ -122,7 +127,7 @@ class DatasetScreen(Screen):
             md += [f"✅ **Downloaded** {rec['downloaded']} · {_fmt_bytes(rec.get('bytes', 0))} on disk",
                    "", f"`{where}`"]
         else:
-            md += ["Not downloaded yet. Press **⇩ Download** (or Enter)."]
+            md += ["Not downloaded yet. Click **⇩ Download** to get it."]
         self.query_one("#hub-text", Markdown).update("\n".join(md))
         self._refresh_buttons()
 
@@ -138,15 +143,6 @@ class DatasetScreen(Screen):
             self.query_one("#hub-status", Static).update("")
 
     # -- actions -------------------------------------------------------------
-
-    def action_primary(self) -> None:
-        d = self.current
-        if d is None or self.downloading:
-            return
-        if not hub.status(d, self.ws.data_dir):
-            self._start_download()
-        elif self.use_label:
-            self._use()
 
     def action_focus_list(self) -> None:
         self.query_one("#hub-list", OptionList).focus()
