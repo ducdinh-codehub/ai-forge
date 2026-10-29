@@ -1,6 +1,7 @@
 """Serve the selected model as a web API + demo page while this dialog is open."""
 from __future__ import annotations
 
+from rich.markup import escape
 from textual import work
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
@@ -37,7 +38,7 @@ class ServeDialog(Dialog):
         from ..serve import missing_dependencies
 
         if problem := missing_dependencies():
-            self.error(problem)
+            self.error(escape(problem))  # the hint contains "[serve]", which isn't a style tag
             self.query_one("#ok", Button).disabled = True
 
     def submit(self) -> None:
@@ -71,18 +72,23 @@ class ServeDialog(Dialog):
 
     def _started(self, server) -> None:
         self.server = server
+        # Both addresses are clickable: they open in the browser.
         self.query_one("#status", Static).update(
-            f"[green]● Running[/] at [b]{server.url}[/b]\n"
-            f"  API docs: {server.url}/docs · try it from a terminal:\n"
-            f"  [dim]curl {server.url}/info[/]")
+            f"[green]● Running[/] at [@click=screen.open_browser][b u]{server.url}[/][/]  [dim](click to open)[/]\n"
+            f"  API docs: [@click=screen.open_browser('/docs')][u]{server.url}/docs[/][/]\n"
+            f"  [dim]Try it from a terminal: curl {server.url}/info[/]")
         self.query_one("#port", Input).disabled = True
         self.query_one("#open", Button).disabled = False
         ok = self.query_one("#ok", Button)
         ok.label, ok.variant, ok.disabled = "■ Stop", "error", False
 
+    def action_open_browser(self, path: str = "") -> None:
+        if self.server:
+            self.app.open_url(self.server.url + path)
+
     def _failed(self, msg: str) -> None:
         self.query_one("#status", Static).update("")
-        self.error(msg)
+        self.error(escape(msg))
         self.query_one("#ok", Button).disabled = False
 
     def _stop(self) -> None:
@@ -96,8 +102,8 @@ class ServeDialog(Dialog):
         ok.label, ok.variant = "▶ Start", "success"
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "open" and self.server:
-            self.app.open_url(self.server.url)
+        if event.button.id == "open":
+            self.action_open_browser()
 
     def dismiss(self, result=None):
         if self.server:
