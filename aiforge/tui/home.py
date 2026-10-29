@@ -23,6 +23,7 @@ Build, train and share neural networks - no code needed.
  [reverse] p [/reverse] [b]Use[/b]        get predictions from the model
  [reverse] v [/reverse] [b]Evaluate[/b]   measure how good it really is (metrics, mistakes…)
  [reverse] x [/reverse] [b]Export[/b]     save it as .pt, .safetensors, ONNX, …
+ [reverse] a [/reverse] [b]Serve[/b]      run it as a web API with a demo page
  [reverse] g [/reverse] [b]Guide[/b]      learn ML basics, model types and every layer
  [reverse] s [/reverse] [b]Datasets[/b]   download famous, trusted datasets to train on
 
@@ -43,6 +44,7 @@ class HomeScreen(Screen):
         Binding("p", "predict", "Use"),
         Binding("v", "evaluate", "Evaluate"),
         Binding("x", "export", "Export"),
+        Binding("a", "serve", "Serve"),
         Binding("g,question_mark", "guide", "Guide"),
         Binding("s", "datasets", "Datasets"),
         Binding("w", "load_weights", "Load weights", show=False),
@@ -77,6 +79,7 @@ class HomeScreen(Screen):
                     yield Button("◉ Use", id="predict")
                     yield Button("📊 Evaluate", id="evaluate")
                     yield Button("⇩ Export", id="export")
+                    yield Button("🌐 Serve", id="serve")
                     yield Button("📖 Guide", id="guide")
                     yield Button(self._theme_label(), id="toggle_theme")
                 with VerticalScroll(id="details"):
@@ -239,6 +242,15 @@ class HomeScreen(Screen):
             from .export import ExportScreen
 
             self.app.push_screen(ExportScreen(name))
+
+    def action_serve(self) -> None:
+        if name := self._need_model():
+            if not self.ws.has_weights(name):
+                self.notify(f"Train '{name}' first - there is nothing to serve yet.", severity="warning")
+                return
+            from .serve import ServeDialog
+
+            self.app.push_screen(ServeDialog(self.ws, name))
 
     def action_guide(self) -> None:
         from .guide import GuideScreen
