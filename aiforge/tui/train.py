@@ -649,6 +649,9 @@ class TrainScreen(Screen):
             log.write("[yellow]No epoch completed - nothing saved.[/]")
             return
         self.spec.data["preprocess"] = self.info.preprocess
+        if self.spec.class_names != self.info.class_names:
+            # A head that is already the right size isn't a mismatch, so auto-fit never ran.
+            self.spec.class_names = list(self.info.class_names)
         cfg = {k: v for k, v in self.data_cfg.items() if v not in (None, "")}
         if cfg.get("path"):
             cfg["path"] = str(Path(cfg["path"]).expanduser())
