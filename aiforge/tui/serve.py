@@ -1,6 +1,7 @@
 """Serve the selected model as a web API + demo page while this dialog is open."""
 from __future__ import annotations
 
+from rich.markup import escape
 from textual import work
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
@@ -37,7 +38,7 @@ class ServeDialog(Dialog):
         from ..serve import missing_dependencies
 
         if problem := missing_dependencies():
-            self.error(problem)
+            self.error(escape(problem))  # the hint contains "[serve]", which isn't a style tag
             self.query_one("#ok", Button).disabled = True
 
     def submit(self) -> None:
@@ -82,7 +83,7 @@ class ServeDialog(Dialog):
 
     def _failed(self, msg: str) -> None:
         self.query_one("#status", Static).update("")
-        self.error(msg)
+        self.error(escape(msg))
         self.query_one("#ok", Button).disabled = False
 
     def _stop(self) -> None:
