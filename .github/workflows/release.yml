@@ -1,0 +1,29 @@
+name: Publish to PyPI
+
+# Push a tag like v0.1.8 to publish that version. The tag must match aiforge.__version__.
+# One-time setup on PyPI: project aiforge-studio → Publishing → add a trusted publisher
+# (owner ducdinh-codehub, repo ai-forge, workflow release.yml, environment pypi).
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write  # trusted publishing: no API token stored in GitHub
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Check the tag matches the version
+        run: |
+          version=$(python -c "import re; print(re.search(r'__version__ = \"(.+)\"', open('aiforge/__init__.py').read())[1])")
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "Tag $GITHUB_REF_NAME doesn't match __version__ $version"; exit 1
+          fi
+      - run: pip install build
+      - run: python -m build
+      - uses: pypa/gh-action-pypi-publish@release/v1

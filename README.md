@@ -518,7 +518,9 @@ docs/make_screenshots.py   regenerates the README screenshots
 
 **Tests:** `pip install -e ".[dev]" && pytest`
 
-**Release:** bump `__version__` in `aiforge/__init__.py`, then `python -m build && twine upload dist/*`.
+**Release:** bump `__version__` in `aiforge/__init__.py`, merge to `main`, then push a matching tag
+(`git tag v0.1.8 && git push origin v0.1.8`). GitHub Actions builds it and publishes it to PyPI.
+Every pull request runs the tests on Linux, macOS and Windows first.
 
 Built with [PyTorch](https://pytorch.org) and [Textual](https://textual.textualize.io) ·
 [MIT License](https://github.com/ducdinh-codehub/ai-forge/blob/main/LICENSE)
