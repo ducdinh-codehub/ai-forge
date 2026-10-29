@@ -42,7 +42,8 @@ No PyTorch or Python knowledge needed. The built-in **Guide** (`g`) teaches the 
 8. [Troubleshooting](#8-troubleshooting)
 9. [Where are my files?](#9-where-are-my-files)
 10. [Command line (no UI)](#10-command-line-no-ui)
-11. [For developers](#11-for-developers)
+11. [Web API: use your model from other programs](#11-web-api-use-your-model-from-other-programs)
+12. [For developers](#12-for-developers)
 
 ---
 
@@ -186,8 +187,7 @@ the last result. New to the metrics? Press `g` → **7. Is my model good?**
 ### Serve: use it from a web page or another program
 `a` (or **🌐 Serve**) starts a small web server for the selected model: a demo page to try it in
 the browser and a JSON API other programs can call. Only your computer can reach it, and it stops
-when you close the window. Needs one extra install, done once:
-`pipx inject aiforge-studio fastapi uvicorn python-multipart` (pip: `pip install "aiforge-studio[serve]"`).
+when you close the window. Step-by-step: [Web API](#11-web-api-use-your-model-from-other-programs).
 
 ### Import
 Press `i`: AIForge bundles, `.json`, `.safetensors`, or a PyTorch `nn.Sequential` saved with
@@ -299,6 +299,7 @@ New to the words (epoch, loss, overfitting…)? Press `g` → **🎓 ML basics**
 | `p` | Use | `Ctrl+Z` | Undo | | |
 | `v` | Evaluate | | | | |
 | `x` | Export | `Ctrl+S` | Save | | |
+| `a` | Serve (web API) | | | | |
 | `s` | Datasets | `Ctrl+E` | Explain tab | | |
 | `g` | Guide | `?` | Full guide | | |
 | `w` `c` `r` `d` | Load weights · Duplicate · Rename · Delete | | | | |
@@ -352,7 +353,7 @@ aiforge train spiral -d spirals -e 40 --lr 0.005    # toy set, mnist, a .csv/.tx
 aiforge predict spiral "0.1, 0.45"                  # or: -f table.csv -o predictions.csv
 aiforge evaluate spiral                             # metrics + a saved report
 aiforge export spiral -F onnx,bundle                # or: -F all
-aiforge serve spiral                                # web API + demo page on http://localhost:8000
+aiforge serve spiral                                # web API + demo page (see section 11)
 aiforge list
 ```
 
@@ -365,25 +366,134 @@ aiforge list
 | Pick the CSV column to predict | `--target price` (text classifiers: also `--text-column review`) |
 | Stop early | `Ctrl+C`: stops after the current batch and keeps the best epoch |
 
-**The web API** (`aiforge serve`, interactive docs at `/docs`):
-
-```bash
-curl localhost:8000/info                                        # task, classes, what the input looks like
-curl -X POST localhost:8000/predict -H 'Content-Type: application/json' \
-     -d '{"input": "0.1, 0.45"}'                                 # or {"inputs": [...]} for many
-curl -X POST localhost:8000/predict/image -F file=@cat.jpg      # image models
-curl -X POST localhost:8000/generate -H 'Content-Type: application/json' \
-     -d '{"prompt": "Once upon", "length": 200}'                # language models
-```
-
-It listens on this computer only; `--host 0.0.0.0` opens it to your network (there is no password).
-
 `aiforge <command> -h` lists every option. Commands exit with code 1 and a one-line message
 when something is wrong, so they work in scripts.
 
 ---
 
-## 11. For developers
+## 11. Web API: use your model from other programs
+
+`aiforge serve` turns a trained model into a small web server. You can then try the model on a
+web page, or call it from any program (Python, JavaScript, a spreadsheet script…).
+This walk-through uses the house-price example that ships with AIForge.
+
+### Step 1 · Install the web server parts (once)
+
+```bash
+pipx inject aiforge-studio fastapi uvicorn python-multipart
+```
+
+<sub>Installed with pip instead? Use `pip install "aiforge-studio[serve]"`.</sub>
+
+### Step 2 · Train a model
+
+A model that guesses a house's **price** from its number of **rooms** and its **area** (m²):
+
+```bash
+aiforge new house-price -t regressor
+aiforge train house-price -d <path-to>/house_prices.csv -e 60 --lr 0.01
+```
+
+<sub>`house_prices.csv` is in [`aiforge/examples/`](aiforge/examples/house_prices.csv). You can
+also do this step in the app: create the model with `n`, train it with `t`.</sub>
+
+### Step 3 · Start the server
+
+```bash
+aiforge serve house-price
+```
+
+You should see:
+
+```
+Serving house-price at http://localhost:8000  (API docs: http://localhost:8000/docs) · Ctrl+C to stop
+```
+
+Leave this terminal open. The server runs until you press `Ctrl+C`.
+
+<sub>In the app: select the model, press `a` (or **🌐 Serve**), then **▶ Start**. It stops when
+you close that window.</sub>
+
+### Step 4 · Try it in the browser
+
+| Open | What you get |
+|---|---|
+| **http://localhost:8000** | A demo page: type `4, 110`, click **Predict**, see the price |
+| **http://localhost:8000/docs** | Every endpoint, with a **Try it out** button |
+
+### Step 5 · Call it from your own code
+
+Open a **second** terminal (the first one is running the server).
+
+**With curl:**
+
+```bash
+curl -X POST http://localhost:8000/predict \
+     -H "Content-Type: application/json" \
+     -d '{"input": "4, 110"}'
+```
+
+Answer:
+
+```json
+{"predictions": [{"label": "prediction", "score": 420.07}]}
+```
+
+**With Python** (no extra packages needed):
+
+```python
+import json
+import urllib.request
+
+def predict(text):
+    request = urllib.request.Request(
+        "http://localhost:8000/predict",
+        data=json.dumps({"input": text}).encode(),
+        headers={"Content-Type": "application/json"},
+    )
+    answer = json.load(urllib.request.urlopen(request))
+    return answer["predictions"][0]["score"]
+
+print(predict("4, 110"))   # 420.07  → a 4-room, 110 m² house
+print(predict("6, 160"))   # 623.18
+```
+
+**Many inputs at once:** send `"inputs"` (a list) instead of `"input"`:
+
+```bash
+curl -X POST http://localhost:8000/predict \
+     -H "Content-Type: application/json" \
+     -d '{"inputs": ["3, 70", "6, 160"]}'
+```
+
+```json
+{"predictions": [[{"label": "prediction", "score": 291.96}],
+                 [{"label": "prediction", "score": 623.18}]]}
+```
+
+### Other kinds of models
+
+The steps are the same; only what you send changes. `GET /info` always tells you what a model expects.
+
+| Model | Endpoint | Send | You get back |
+|---|---|---|---|
+| Numbers (CSV table) | `POST /predict` | `{"input": "4, 110"}` | A value, or each class with its probability |
+| Text classifier | `POST /predict` | `{"input": "I love this movie"}` | `[{"label": "pos", "score": 0.89}, …]` |
+| Images | `POST /predict/image` | The image file: `curl -F file=@cat.jpg …` | Each class with its probability |
+| Language model (tiny GPT) | `POST /generate` | `{"prompt": "Once upon", "length": 200}` | `{"text": "…what it wrote…"}` |
+
+### Good to know
+
+| | |
+|---|---|
+| **Wrong input?** | You get status `422` and a plain message, e.g. `{"detail": "Expected 2 values (rooms, area), got 1"}` |
+| **Port 8000 busy?** | Pick another: `aiforge serve house-price -p 8001` |
+| **Who can reach it?** | Only your computer. `--host 0.0.0.0` opens it to your network, and **there is no password**, so anyone on that network can use the model |
+| **Check it's running** | `curl http://localhost:8000/health` → `{"status": "ok"}` |
+
+---
+
+## 12. For developers
 
 ```
 aiforge/
