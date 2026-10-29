@@ -43,7 +43,8 @@ dependencies = [
 
 [project.optional-dependencies]
 nvidia = ["nvidia-ml-py>=12"]  # GPU utilisation / temperature on NVIDIA cards
-dev = ["pytest>=8"]
+serve = ["fastapi>=0.110", "uvicorn>=0.29", "python-multipart>=0.0.9"]  # aiforge serve: web API + demo page
+dev = ["pytest>=8", "fastapi>=0.110", "uvicorn>=0.29", "python-multipart>=0.0.9", "httpx>=0.27"]
 
 [project.urls]
 Homepage = "https://github.com/ducdinh-codehub/ai-forge"

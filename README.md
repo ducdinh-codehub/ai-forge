@@ -183,6 +183,12 @@ the last result. New to the metrics? Press `g` → **7. Is my model good?**
 | PyTorch code `.py` · JSON · summary | Read, edit or document the model |
 | TorchScript · ONNX | Run in C++, mobile, ONNX Runtime, TensorRT, browsers… |
 
+### Serve: use it from a web page or another program
+`a` (or **🌐 Serve**) starts a small web server for the selected model: a demo page to try it in
+the browser and a JSON API other programs can call. Only your computer can reach it, and it stops
+when you close the window. Needs one extra install, done once:
+`pipx inject aiforge-studio fastapi uvicorn python-multipart` (pip: `pip install "aiforge-studio[serve]"`).
+
 ### Import
 Press `i`: AIForge bundles, `.json`, `.safetensors`, or a PyTorch `nn.Sequential` saved with
 `torch.save`. ⚠️ **Only import `.pt`/`.pth` files you trust**, as they can run code.
@@ -346,6 +352,7 @@ aiforge train spiral -d spirals -e 40 --lr 0.005    # toy set, mnist, a .csv/.tx
 aiforge predict spiral "0.1, 0.45"                  # or: -f table.csv -o predictions.csv
 aiforge evaluate spiral                             # metrics + a saved report
 aiforge export spiral -F onnx,bundle                # or: -F all
+aiforge serve spiral                                # web API + demo page on http://localhost:8000
 aiforge list
 ```
 
@@ -357,6 +364,19 @@ aiforge list
 | Train a tiny GPT and let it write | `aiforge train gpt -d poems.txt` then `aiforge generate gpt "Once upon"` |
 | Pick the CSV column to predict | `--target price` (text classifiers: also `--text-column review`) |
 | Stop early | `Ctrl+C`: stops after the current batch and keeps the best epoch |
+
+**The web API** (`aiforge serve`, interactive docs at `/docs`):
+
+```bash
+curl localhost:8000/info                                        # task, classes, what the input looks like
+curl -X POST localhost:8000/predict -H 'Content-Type: application/json' \
+     -d '{"input": "0.1, 0.45"}'                                 # or {"inputs": [...]} for many
+curl -X POST localhost:8000/predict/image -F file=@cat.jpg      # image models
+curl -X POST localhost:8000/generate -H 'Content-Type: application/json' \
+     -d '{"prompt": "Once upon", "length": 200}'                # language models
+```
+
+It listens on this computer only; `--host 0.0.0.0` opens it to your network (there is no password).
 
 `aiforge <command> -h` lists every option. Commands exit with code 1 and a one-line message
 when something is wrong, so they work in scripts.
@@ -374,6 +394,7 @@ aiforge/
 ├── trainer.py    training / fine-tuning loop
 ├── pipeline.py   load data → fit model → train → save, without a UI
 ├── cli.py        the command line (aiforge train / predict / ...)
+├── serve.py      web API + demo page (FastAPI), used by `aiforge serve` and the Serve dialog
 ├── predict.py    single and batch predictions
 ├── evaluate.py   metrics, baseline, calibration, error analysis, slices, significance tests
 ├── model_io.py   export and import

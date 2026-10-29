@@ -11,13 +11,14 @@ import threading
 from pathlib import Path
 
 from rich.console import Console
+from rich.markup import escape
 from rich.progress import BarColumn, Progress, TextColumn, TimeRemainingColumn
 from rich.table import Table
 
 out = Console(highlight=False, soft_wrap=True)  # long paths stay copy-pasteable
 err = Console(stderr=True, highlight=False, soft_wrap=True)
 
-COMMANDS = ("list", "templates", "new", "train", "predict", "generate", "evaluate", "export")
+COMMANDS = ("list", "templates", "new", "train", "predict", "generate", "evaluate", "export", "serve")
 
 
 class CLIError(Exception):
@@ -99,6 +100,15 @@ def add_commands(parser: argparse.ArgumentParser, common: argparse.ArgumentParse
                         "weights_safetensors, spec_json, pytorch_py, summary_txt, torchscript, onnx")
     p.add_argument("-o", "--out", help="Folder to write to (default: <workspace>/exports/<model>)")
 
+    p = sub.add_parser("serve", parents=[common], help="Serve a model as a web API with a demo page",
+                       description="Start a web server for a trained model: a demo page at /, a JSON API "
+                                   "(/predict, /generate, /predict/image) and its docs at /docs. "
+                                   "Needs: pip install \"aiforge-studio[serve]\"")
+    p.add_argument("model")
+    p.add_argument("--host", default="127.0.0.1",
+                   help="Address to listen on (default 127.0.0.1: this computer only; 0.0.0.0: your network)")
+    p.add_argument("-p", "--port", type=int, default=8000)
+
 
 def run(args: argparse.Namespace, workspace: Path) -> int:
     from .spec import Workspace
@@ -107,10 +117,10 @@ def run(args: argparse.Namespace, workspace: Path) -> int:
         ws = Workspace(workspace)
         return globals()[f"cmd_{args.command}"](ws, args) or 0
     except CLIError as e:
-        err.print(f"[red]error:[/] {e}")
+        err.print(f"[red]error:[/] {escape(str(e))}")  # messages can hold [brackets], e.g. "[serve]"
         return 1
     except (ValueError, FileNotFoundError, KeyError) as e:
-        err.print(f"[red]error:[/] {e.args[0] if e.args else e}")
+        err.print(f"[red]error:[/] {escape(str(e.args[0] if e.args else e))}")
         return 1
 
 
@@ -391,6 +401,25 @@ def cmd_evaluate(ws, args) -> None:
         out.print(f"\nvs {c['other']}: {_fmt(c['score_a'])} vs {_fmt(c['score_b'])} "
                   f"({c['test']}, p = {c['p_value']:.4f}, {verdict})")
     out.print(f"\nFull report: {path}")
+
+
+# -- serve ---------------------------------------------------------------------------------
+
+
+def cmd_serve(ws, args) -> None:
+    from . import serve
+
+    if problem := serve.missing_dependencies():
+        raise CLIError(problem)
+    _need_weights(ws, args.model)
+    serve.check_servable(ws, args.model)
+    if not serve.port_free(args.host, args.port):
+        raise CLIError(f"Port {args.port} is already in use - try another one, e.g. -p {args.port + 1}")
+    url = f"http://{'localhost' if args.host in ('127.0.0.1', '0.0.0.0') else args.host}:{args.port}"
+    out.print(f"Serving [b]{args.model}[/b] at [b]{url}[/b]  (API docs: {url}/docs) · Ctrl+C to stop")
+    if args.host not in ("127.0.0.1", "localhost", "::1"):
+        out.print("[yellow]⚠ Anyone on your network can use this model now. There is no password.[/]")
+    serve.serve_forever(ws, args.model, args.host, args.port)
 
 
 # -- export --------------------------------------------------------------------------------
