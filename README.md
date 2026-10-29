@@ -41,7 +41,8 @@ No PyTorch or Python knowledge needed. The built-in **Guide** (`g`) teaches the 
 7. [Keyboard shortcuts](#7-keyboard-shortcuts)
 8. [Troubleshooting](#8-troubleshooting)
 9. [Where are my files?](#9-where-are-my-files)
-10. [For developers](#10-for-developers)
+10. [Command line (no UI)](#10-command-line-no-ui)
+11. [For developers](#11-for-developers)
 
 ---
 
@@ -332,7 +333,37 @@ AIForge/
 
 ---
 
-## 10. For developers
+## 10. Command line (no UI)
+
+Every main step also works as a plain command, which is handy on a remote GPU machine, in
+scripts, or for an overnight run. Commands use the same workspace as the app, so a model
+trained here shows up there.
+
+```bash
+aiforge templates                                   # what you can start from
+aiforge new spiral -t "mlp classifier"              # a template's number or part of its name
+aiforge train spiral -d spirals -e 40 --lr 0.005    # toy set, mnist, a .csv/.txt file or an image folder
+aiforge predict spiral "0.1, 0.45"                  # or: -f table.csv -o predictions.csv
+aiforge evaluate spiral                             # metrics + a saved report
+aiforge export spiral -F onnx,bundle                # or: -F all
+aiforge list
+```
+
+| I want to… | Do this |
+|---|---|
+| Train again on the same data | `aiforge train spiral -e 20` (leave out `-d`) |
+| Continue from the saved weights | `aiforge train spiral --resume -e 20` |
+| Fine-tune into a new model | `aiforge train spiral -d moons --save-as moons` |
+| Train a tiny GPT and let it write | `aiforge train gpt -d poems.txt` then `aiforge generate gpt "Once upon"` |
+| Pick the CSV column to predict | `--target price` (text classifiers: also `--text-column review`) |
+| Stop early | `Ctrl+C`: stops after the current batch and keeps the best epoch |
+
+`aiforge <command> -h` lists every option. Commands exit with code 1 and a one-line message
+when something is wrong, so they work in scripts.
+
+---
+
+## 11. For developers
 
 ```
 aiforge/
@@ -341,6 +372,8 @@ aiforge/
 ├── data.py       dataset loaders and input preprocessing
 ├── hub.py        dataset hub: catalog of trusted datasets, download + conversion
 ├── trainer.py    training / fine-tuning loop
+├── pipeline.py   load data → fit model → train → save, without a UI
+├── cli.py        the command line (aiforge train / predict / ...)
 ├── predict.py    single and batch predictions
 ├── evaluate.py   metrics, baseline, calibration, error analysis, slices, significance tests
 ├── model_io.py   export and import
@@ -351,6 +384,8 @@ aiforge/
 └── tui/          the Textual interface (one module per screen)
 docs/make_screenshots.py   regenerates the README screenshots
 ```
+
+**Tests:** `pip install -e ".[dev]" && pytest`
 
 **Release:** bump `__version__` in `aiforge/__init__.py`, then `python -m build && twine upload dist/*`.
 
