@@ -14,6 +14,9 @@ and versions follow [Semantic Versioning](https://semver.org/) (still `0.x`: any
   screen) and background image loading on Linux (`--workers`, *Data workers*).
 - **Training script export.** A standalone `train.py` that re-trains the model in plain PyTorch:
   the data loading, the settings of its last run and the training loop. Export → *Training script*.
+- **More data sources.** Excel (`.xlsx`) and Parquet tables, images listed in a table (a path
+  column + a label column), and any Hugging Face dataset by name (`-d hf:imdb`). Install the extra
+  packages with `pip install "aiforge-studio[data]"`.
 - Tests for the core modules: every template builds, exports to ONNX and TorchScript, and round-trips.
 - `docs/improvement-guide.md`: the roadmap.
 - Docs: CPU-only install (a ~200 MB PyTorch instead of ~2 GB).

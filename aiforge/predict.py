@@ -7,7 +7,7 @@ from pathlib import Path
 import torch
 from torch import nn
 
-from .data import IMAGE_EXT, _read_csv, prepare_input
+from .data import IMAGE_EXT, prepare_input, read_table
 from .spec import ModelSpec
 
 
@@ -69,7 +69,7 @@ def predict_batch(spec: ModelSpec, model: nn.Module, src: str, dst: str | None =
         inputs = [(str(f.relative_to(p)), str(f)) for f in files]
         header = ["file"]
     else:
-        cols, rows = _read_csv(p)
+        cols, rows = read_table(p)
         header = cols
         if pre.get("type") == "text":
             tcol = next((c for c in cols if c.lower() in ("text", "sentence", "review", "content")), cols[0])

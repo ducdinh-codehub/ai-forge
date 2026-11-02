@@ -37,8 +37,12 @@ def training_script(spec: ModelSpec, cfg: TrainConfig) -> str:
         data_code = _CSV_COMMON + _CSV_TABLE
     elif source == "csv_text":
         data_code = _CSV_COMMON + _CSV_TEXT
+    elif source == "hf" and len(spec.input_shape) != 3:
+        data_code = _HF_ROWS + (_CSV_TEXT if spec.input_dtype == "long" else _CSV_TABLE)
     elif source == "image_folder":
         data_code = _IMAGE_FOLDER
+    elif source == "image_csv":
+        data_code = _CSV_COMMON + _IMAGE_CSV
     elif source in datamod.TORCHVISION:
         data_code = _TORCHVISION
     elif source == "text_corpus":
@@ -62,7 +66,7 @@ def training_script(spec: ModelSpec, cfg: TrainConfig) -> str:
         "seed": int(data_cfg.get("seed", 42)),
     }
     data = {k: v for k, v in data_cfg.items() if k not in ("val_split", "seed", "hub")}
-    if source == "image_folder":
+    if source in ("image_folder", "image_csv"):
         data.update(size=pre.get("size", spec.input_shape[1:]), channels=pre.get("channels", spec.input_shape[0]),
                     mean=pre.get("mean"), std=pre.get("std"))
     if source in ("csv_text", "text_corpus"):
@@ -89,7 +93,7 @@ def training_script(spec: ModelSpec, cfg: TrainConfig) -> str:
         "from torch import nn",
         "from torch.utils.data import DataLoader, Dataset, TensorDataset, random_split",
     ]
-    if source in ("image_folder",) or source in datamod.TORCHVISION:
+    if source in ("image_folder", "image_csv") or source in datamod.TORCHVISION:
         head.append("from torchvision import datasets, transforms")
     if custom:
         head.append(f"from aiforge.layers import {', '.join(custom)}  # custom blocks (pip install aiforge-studio)")
@@ -134,6 +138,8 @@ def _describe(cfg: dict) -> str:
         return f"the built-in '{cfg.get('kind', 'moons')}' toy dataset"
     if src in datamod.TORCHVISION:
         return f"{src} (downloaded by torchvision)"
+    if src == "hf":
+        return f"the Hugging Face dataset '{cfg.get('name')}' ({cfg.get('split') or 'train'} split)"
     return f"{cfg.get('path')} ({datamod.SOURCES.get(src, src).split(' - ')[0]})"
 
 
@@ -190,8 +196,24 @@ def load_data(path):
 
 _CSV_COMMON = '''
 def read_csv(path):
+    """Header and rows (as text) of a CSV, Excel (.xlsx, needs openpyxl) or Parquet (needs pyarrow) file."""
     import csv
 
+    def cell(v):
+        return "" if v is None else str(int(v)) if isinstance(v, float) and v.is_integer() else str(v)
+
+    if str(path).lower().endswith((".xlsx", ".xlsm")):
+        import openpyxl
+
+        rows = [[cell(v) for v in r] for r in openpyxl.load_workbook(path, read_only=True, data_only=True)
+                .worksheets[0].iter_rows(values_only=True)]
+        rows = [r for r in rows if any(c.strip() for c in r)]
+        return rows[0], [r for r in rows[1:] if len(r) == len(rows[0])]
+    if str(path).lower().endswith(".parquet"):
+        import pyarrow.parquet as pq
+
+        table = pq.read_table(path).to_pydict()
+        return list(table), [[cell(v) for v in r] for r in zip(*table.values())]
     with open(path, newline="", encoding="utf-8-sig") as f:
         sample = f.read(4096)
         f.seek(0)
@@ -268,6 +290,66 @@ def load_data(path):
     classes = sorted(set(r[t].strip() for r in rows))
     y = torch.tensor([classes.index(r[t].strip()) for r in rows])
     return split(TensorDataset(x, y), SETTINGS["val_split"], SETTINGS["seed"]), {"classes": classes}
+'''
+
+_HF_ROWS = '''
+def read_csv(path):
+    """The Hugging Face dataset as a table of text: the label column last (pip install datasets)."""
+    from datasets import load_dataset
+
+    ds = load_dataset(DATA["name"], DATA.get("subset"), split=DATA.get("split") or "train")
+    cols = [c for c in ds.column_names if type(ds.features[c]).__name__ not in ("Image", "Audio")]
+    target = DATA.get("target") or next((c for c in ("label", "labels") if c in cols), cols[-1])
+    names = getattr(ds.features[target], "names", None)
+    labels = [names[v] if names else str(v) for v in ds[target]]
+    others = [c for c in cols if c != target]
+    text = DATA.get("text_column")
+    if text in others:  # the text column first, so it is found by default
+        others.remove(text)
+        others.insert(0, text)
+    columns = [[("" if v is None else str(v)) for v in ds[c]] for c in others] + [labels]
+    return others + [target], [list(r) for r in zip(*columns)]
+
+
+def is_number(v):
+    try:
+        float(v)
+        return True
+    except ValueError:
+        return False
+
+'''
+
+_IMAGE_CSV = '''
+class ImageTable(Dataset):
+    def __init__(self, items, transform):
+        self.items, self.transform = items, transform
+
+    def __len__(self):
+        return len(self.items)
+
+    def __getitem__(self, i):
+        from PIL import Image
+
+        path, label = self.items[i]
+        with Image.open(path) as im:
+            return self.transform(im), label
+
+
+def load_data(path):
+    """A table of image paths (relative to the table's folder) and labels."""
+    header, rows = read_csv(path)
+    image = DATA.get("image_column") or next(h for i, h in enumerate(header) if Path(rows[0][i]).suffix.lower()
+                                               in (".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp"))
+    target = DATA.get("target") or next(h for h in reversed(header) if h != image)
+    i, t = header.index(image), header.index(target)
+    rows = [r for r in rows if r[i].strip()]
+    classes = sorted({r[t].strip() for r in rows})
+    items = [(Path(path).parent / r[i].strip(), classes.index(r[t].strip())) for r in rows]
+    to_colours = transforms.Grayscale(1) if DATA["channels"] == 1 else transforms.Lambda(lambda im: im.convert("RGB"))
+    tf = transforms.Compose([transforms.Resize(tuple(DATA["size"])), to_colours, transforms.ToTensor(),
+                             transforms.Normalize(DATA["mean"], DATA["std"])])
+    return split(ImageTable(items, tf), SETTINGS["val_split"], SETTINGS["seed"]), {"classes": classes}
 '''
 
 _IMAGE_FOLDER = '''

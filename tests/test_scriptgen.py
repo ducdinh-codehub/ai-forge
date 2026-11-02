@@ -45,3 +45,39 @@ def test_untrained_model_has_no_script(tmp_path):
     main(["-w", str(ws_dir), "new", "m", "-t", "mlp classifier"])
     with pytest.raises(ValueError, match="Train the model in AIForge first"):
         export(Workspace(ws_dir), "m", "train_py", tmp_path)
+
+
+def _run_script(tmp_path, template, data):
+    ws_dir = tmp_path / "ws"
+    assert main(["-w", str(ws_dir), "new", "m", "-t", template]) == 0
+    assert main(["-w", str(ws_dir), "train", "m", "-d", str(data), "-e", "1", "--device", "cpu"]) == 0
+    ws = Workspace(ws_dir)
+    script = export(ws, "m", "train_py", tmp_path)
+    out = tmp_path / "w.pt"
+    proc = subprocess.run([sys.executable, str(script), "--epochs", "1", "--device", "cpu", "--out", str(out)],
+                          capture_output=True, text=True, timeout=300, cwd=tmp_path)
+    assert proc.returncode == 0, proc.stderr
+    _, model, _ = ws.load_model("m")
+    model.load_state_dict(torch.load(out, weights_only=True))
+
+
+def test_script_reads_parquet_and_tables_of_images(tmp_path):
+    from test_data_sources import _as_numbers, _fruit_rows, _image_table, _parquet
+
+    pytest.importorskip("pyarrow")
+    _parquet(tmp_path / "fruit.parquet", [_fruit_rows()[0]] + _as_numbers(_fruit_rows()[1:]))
+    _run_script(tmp_path / "a", "mlp classifier", tmp_path / "fruit.parquet")
+    (tmp_path / "b").mkdir()
+    _run_script(tmp_path / "b", "small cnn", _image_table(tmp_path / "b"))
+
+
+def test_script_for_huggingface_text_uses_datasets():
+    from aiforge.scriptgen import training_script
+    from aiforge.trainer import TrainConfig
+    from conftest import make_spec
+
+    spec = make_spec("Text classifier (Embedding + LSTM)")
+    spec.data["dataset_cfg"] = {"source": "hf", "name": "imdb", "split": "train"}
+    text = training_script(spec, TrainConfig())
+    assert "from datasets import load_dataset" in text and "the Hugging Face dataset 'imdb'" in text
+    compile(text, "train.py", "exec")

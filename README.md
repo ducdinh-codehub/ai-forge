@@ -267,10 +267,21 @@ Sample files are under **📦 Examples** in the browser.
 
 | Kind | Format |
 |---|---|
-| **Table** (CSV) | One row per example. The **last column** is predicted (or choose another). Text columns and missing numbers are handled for you. |
-| **Text** (CSV) | A text column and a label column: `"great movie",pos` |
+| **Table** (CSV, Excel `.xlsx`, Parquet) | One row per example. The **last column** is predicted (or choose another). Text columns and missing numbers are handled for you. |
+| **Text** (table) | A text column and a label column: `"great movie",pos` |
 | **Images** | A folder with **one sub-folder per class** (`cat/`, `dog/`). Images are resized automatically. |
+| **Images listed in a table** | A column of image paths (relative to the table) and a label column: `photos/1.jpg,cat` |
 | **Plain text** (.txt) | Any text for a language model to imitate: a book, poems, lyrics, code. Split into characters or words. A short sample (`nursery_rhymes.txt`) is built in; aim for 1 MB+ for real sentences. |
+
+### Option C: any Hugging Face dataset
+
+Choose **Hugging Face dataset** as the source and type its name from
+[huggingface.co/datasets](https://huggingface.co/datasets), e.g. `imdb` or `uoft-cs/cifar10`
+(command line: `-d hf:imdb`). AIForge reads it as images, text or a table to suit your model,
+and keeps the dataset's class names.
+
+Excel, Parquet and Hugging Face need a few extra packages: `pipx inject aiforge-studio openpyxl pyarrow datasets`
+(or `pip install "aiforge-studio[data]"`).
 
 > **How much data?** For images, aim for 50–100+ per class. With fewer, use a
 > **Transfer learning** template.
@@ -389,6 +400,8 @@ aiforge list
 | Fine-tune into a new model | `aiforge train spiral -d moons --save-as moons` |
 | Train a tiny GPT and let it write | `aiforge train gpt -d poems.txt` then `aiforge generate gpt "Once upon"` |
 | Force full precision / load images with 4 processes | `--precision fp32` · `--workers 4` |
+| Train on a Hugging Face dataset | `aiforge train reviews -d hf:imdb` (`hf:NAME:SUBSET`, `--split test`) |
+| Train on an Excel file / a table of image paths | `-d sales.xlsx` · `-d photos.csv` (image models; `--image-column file`) |
 | Pick the CSV column to predict | `--target price` (text classifiers: also `--text-column review`) |
 | Stop early | `Ctrl+C`: stops after the current batch and keeps the best epoch |
 

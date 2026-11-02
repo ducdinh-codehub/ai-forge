@@ -22,7 +22,7 @@ from .. import EXAMPLES_DIR
 from ..data import IMAGE_EXT, TEXT_EXT
 
 # Ready-made filters for the places that ask for a path.
-CSV_EXT = {".csv", ".tsv", ".txt"}
+CSV_EXT = {".csv", ".tsv", ".txt", ".xlsx", ".xlsm", ".parquet"}  # tables
 MODEL_EXT = {".zip", ".json", ".safetensors", ".pt", ".pth", ".bin"}
 WEIGHT_EXT = {".pt", ".pth", ".bin", ".safetensors"}
 
@@ -327,7 +327,7 @@ def _preview_dir(p: Path) -> str:
     if imgs:
         lines.append(f"🖼  {len(imgs)} images (usable for batch prediction)")
     if csvs:
-        lines.append(f"📄 {len(csvs)} CSV files")
+        lines.append(f"📄 {len(csvs)} tables (CSV / Excel / Parquet)")
     if (p / "spec.json").exists():
         lines.append("[green]✓ AIForge model folder[/]")
     lines.append("")
@@ -339,6 +339,11 @@ def _preview_dir(p: Path) -> str:
 
 
 def _preview_csv(p: Path) -> str:
+    if p.suffix.lower() in (".xlsx", ".xlsm", ".parquet"):
+        from ..data import read_table
+
+        header, data = read_table(p)
+        return _describe_table([header] + data[:6], len(data) + 1)
     with p.open(newline="", encoding="utf-8-sig", errors="replace") as f:
         sample = f.read(8192)
         f.seek(0)
@@ -352,6 +357,11 @@ def _preview_csv(p: Path) -> str:
             if n < 7:
                 rows.append(row)
             n += 1
+    return _describe_table(rows, n)
+
+
+def _describe_table(rows: list[list[str]], n: int) -> str:
+    """Columns, their kind and the first rows; ``n`` counts the header row too."""
     if not rows:
         return "[yellow]Empty file[/]"
     header, data = rows[0], rows[1:]

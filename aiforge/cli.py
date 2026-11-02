@@ -46,11 +46,15 @@ def add_commands(parser: argparse.ArgumentParser, common: argparse.ArgumentParse
     d = p.add_argument_group("data")
     d.add_argument("-d", "--data",
                    help="A toy set (moons, spirals, circles, blobs, regression), a built-in dataset "
-                        "(mnist, fashion_mnist, cifar10, cifar100), a .csv / .txt file or an image folder. "
+                        "(mnist, fashion_mnist, cifar10, cifar100), a Hugging Face dataset (hf:imdb), "
+                        "a table (.csv, .xlsx, .parquet), a .txt file or an image folder. "
                         "Leave it out to reuse the data the model was last trained on.")
-    d.add_argument("--source", help="Override the guessed data type: csv, csv_text, text_corpus, image_folder")
+    d.add_argument("--source", help="Override the guessed data type: csv, csv_text, text_corpus, "
+                                    "image_folder, image_csv")
     d.add_argument("--target", help="CSV column to predict (default: the last one)")
     d.add_argument("--text-column", help="CSV column holding the text (text classifiers)")
+    d.add_argument("--image-column", help="Column holding image paths (a table of images)")
+    d.add_argument("--split", help="Hugging Face split to use (default: train)")
     d.add_argument("--tokenizer", choices=["char", "word"], help="How a language model splits text")
     d.add_argument("--val-split", type=float, help="Share of data kept for validation (default 0.2)")
     d.add_argument("--max-samples", type=int, default=0, help="Train on at most this many samples (0 = all)")
@@ -237,7 +241,8 @@ def cmd_train(ws, args) -> int:
     _need_model(ws, args.model)
     spec = ws.load_spec(args.model)
     opts = dict(source=args.source, target=args.target, text_column=args.text_column,
-                tokenizer=args.tokenizer, val_split=args.val_split)
+                image_column=args.image_column, split=args.split, tokenizer=args.tokenizer,
+                val_split=args.val_split)
     cfg = TrainConfig(epochs=args.epochs, batch_size=args.batch_size, lr=args.lr, optimizer=args.optimizer,
                       weight_decay=args.weight_decay, scheduler=args.scheduler, early_stop=args.early_stop,
                       device=args.device, max_samples=args.max_samples, precision=args.precision,

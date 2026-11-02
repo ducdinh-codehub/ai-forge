@@ -86,7 +86,7 @@ def _tabular_file(spec: ModelSpec, path: Path, target: str | None):
     """A new CSV, normalised with the *model's* statistics and category codes (recomputing them
     from the new file would silently shift every input)."""
     pre = spec.data["preprocess"]
-    header, rows = datamod._read_csv(path)
+    header, rows = datamod.read_table(path)
     feats, cats = pre["features"], pre.get("categorical", {})
     missing = [f for f in feats if f not in header]
     if missing:
@@ -149,7 +149,7 @@ def load_eval_data(spec: ModelSpec, data_dir: Path, source: str = "val", path: s
     if pre.get("type") == "tabular" and pre.get("features"):
         ds, desc = _tabular_file(spec, p, target)
         return ds, None, desc, True
-    src = {"text": "csv_text", "image": "image_folder"}.get(pre.get("type"), "csv")
+    src = {"text": "csv_text", "image": "image_csv" if p.is_file() else "image_folder"}.get(pre.get("type"), "csv")
     ds, _, info = datamod.load({"source": src, "path": str(p), "target": target,
                                 "text_column": text_column, "val_split": 0}, data_dir, spec)
     if spec.task == "classification":

@@ -21,10 +21,14 @@ TEXT_SUFFIXES = datamod.TEXT_EXT
 
 def data_cfg_from_arg(value: str, spec: ModelSpec, **opts) -> dict:
     """Turn ``--data`` into a data config: a toy set (``spirals``), a famous dataset (``mnist``),
-    a .csv file, a .txt file or an image folder. ``opts`` adds target / text_column / tokenizer /
-    val_split / source (to override the guess)."""
+    a Hugging Face dataset (``hf:imdb``, ``hf:NAME:SUBSET``), a table (.csv, .xlsx, .parquet), a
+    .txt file or an image folder. ``opts`` adds target / text_column / image_column / tokenizer /
+    split / val_split / source (to override the guess)."""
     opts = {k: v for k, v in opts.items() if v not in (None, "")}
     source = opts.pop("source", None)
+    if source is None and value.strip().lower().startswith("hf:"):
+        name, _, subset = value.strip()[3:].partition(":")
+        return {"source": "hf", "name": name, **({"subset": subset} if subset else {}), **opts}
     if source is None:
         key = value.strip().lower()
         if key in datamod.SYNTHETIC:
@@ -40,6 +44,8 @@ def data_cfg_from_arg(value: str, spec: ModelSpec, **opts) -> dict:
             source = "image_folder"
         elif p.suffix.lower() in TEXT_SUFFIXES:
             source = "text_corpus"
+        elif len(spec.input_shape) == 3:
+            source = "image_csv"  # an image model reads a table of image paths
         elif spec.input_dtype == "long" and spec.task != "language_model":
             source = "csv_text"  # a text classifier reads a text column, not numbers
         else:

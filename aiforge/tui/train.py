@@ -70,6 +70,21 @@ class TrainScreen(Screen):
                 with Vertical(id="grp-text", classes="group"):
                     yield Label("Text column")
                     yield Select([], prompt="first other column", id="text_column")
+                with Vertical(id="grp-image", classes="group"):
+                    yield Label("Image column  [dim](paths, relative to the table)[/]")
+                    yield Select([], prompt="auto-detect", id="image_column")
+                with Vertical(id="grp-hf", classes="group"):
+                    yield Label("Dataset name  [dim](from huggingface.co/datasets)[/]")
+                    yield Input(placeholder="imdb · uoft-cs/cifar10 · scikit-learn/iris", id="hf_name")
+                    with Horizontal(classes="row"):
+                        with Vertical():
+                            yield Label("Subset [dim](optional)[/]")
+                            yield Input(id="hf_subset")
+                        with Vertical():
+                            yield Label("Split")
+                            yield Input("train", id="hf_split")
+                    yield Label("Label column  [dim](blank = auto)[/]")
+                    yield Input(placeholder="label", id="hf_target")
                 with Vertical(id="grp-task", classes="group"):
                     yield Label("Task")
                     yield Select([("auto-detect", "auto"), ("classification", "classification"),
@@ -243,6 +258,11 @@ class TrainScreen(Screen):
                 self.query_one("#kind", Select).value = prev["kind"]
             if prev.get("tokenizer"):
                 self.query_one("#tokenizer", Select).value = prev["tokenizer"]
+            for key, field in (("name", "hf_name"), ("subset", "hf_subset"), ("split", "hf_split")):
+                if prev.get(key):
+                    self.query_one(f"#{field}", Input).value = prev[key]
+            if prev["source"] == "hf" and prev.get("target"):
+                self.query_one("#hf_target", Input).value = prev["target"]
         except Exception:  # noqa: BLE001
             pass
 
@@ -285,13 +305,16 @@ class TrainScreen(Screen):
     def _update_source_fields(self) -> None:
         src = self.query_one("#source", Select).value
         self.query_one("#grp-path").display = src in datamod.FILE_SOURCES
-        self.query_one("#grp-csv").display = src in ("csv", "csv_text")
+        self.query_one("#grp-csv").display = src in ("csv", "csv_text", "image_csv")
         self.query_one("#grp-text").display = src == "csv_text"
+        self.query_one("#grp-image").display = src == "image_csv"
+        self.query_one("#grp-hf").display = src == "hf"
         self.query_one("#grp-task").display = src == "csv"
         self.query_one("#grp-synth").display = src == "synthetic"
         self.query_one("#grp-corpus").display = src == "text_corpus"
         label = {"image_folder": "Folder  [dim](one sub-folder per class)[/]",
-                 "text_corpus": "Text file  [dim](.txt - the model learns to write like it)[/]"}.get(src, "CSV file")
+                 "text_corpus": "Text file  [dim](.txt - the model learns to write like it)[/]"}.get(
+            src, "Table  [dim](.csv, .xlsx, .parquet)[/]")
         self.query_one("#path-label", Label).update(label)
         self.query_one("#path", Input).placeholder = \
             "~/data/book.txt" if src == "text_corpus" else "~/data/table.csv"
@@ -305,10 +328,10 @@ class TrainScreen(Screen):
     @on(Input.Changed, "#path")
     def _refresh_columns(self) -> None:
         src = self.query_one("#source", Select).value
-        if src not in ("csv", "csv_text"):
+        if src not in ("csv", "csv_text", "image_csv"):
             return
         cols = datamod.csv_columns(self.query_one("#path", Input).value)
-        for sel_id in ("#target", "#text_column"):
+        for sel_id in ("#target", "#text_column", "#image_column"):
             sel = self.query_one(sel_id, Select)
             current = sel.value
             sel.set_options([(c, c) for c in cols])
@@ -331,8 +354,10 @@ class TrainScreen(Screen):
                               hint="Pick a plain-text file: a book, poems, song lyrics, code... More text "
                                    "(at least ~1 MB) gives a better model.")
         else:
-            dlg = FileBrowser("Choose a CSV file", mode="file", extensions=CSV_EXT, start=current or None,
-                              hint="Pick a .csv file. The preview shows its columns and first rows.")
+            hint = ("Pick a table with one row per image: a column of image paths (relative to the table) "
+                    "and a label column." if src == "image_csv" else
+                    "Pick a table (.csv, .xlsx, .parquet). The preview shows its columns and first rows.")
+            dlg = FileBrowser("Choose a table", mode="file", extensions=CSV_EXT, start=current or None, hint=hint)
 
         def done(path):
             if path:
@@ -344,11 +369,18 @@ class TrainScreen(Screen):
         def val(sel_id):
             v = self.query_one(sel_id, Select).value
             return None if v in (Select.NULL, Select.BLANK, "auto") else v
+        source = self.query_one("#source", Select).value
+        text = lambda i: self.query_one(f"#{i}", Input).value.strip() or None  # noqa: E731
+        if source == "hf":
+            return {"source": "hf", "name": text("hf_name") or "", "subset": text("hf_subset"),
+                    "split": text("hf_split"), "target": text("hf_target"),
+                    "val_split": float(self.query_one("#val_split", Input).value or 0.2)}
         return {
-            "source": self.query_one("#source", Select).value,
+            "source": source,
             "path": self.query_one("#path", Input).value.strip(),
             "target": val("#target"),
             "text_column": val("#text_column"),
+            "image_column": val("#image_column"),
             "task": val("#task"),
             "kind": self.query_one("#kind", Select).value,
             "tokenizer": self.query_one("#tokenizer", Select).value,
