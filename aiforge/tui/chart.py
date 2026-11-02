@@ -1,4 +1,4 @@
-"""Tiny terminal line chart: plots up to two series on shared axes."""
+"""Tiny terminal line chart: plots several series on shared axes (epoch 1 at the left)."""
 from __future__ import annotations
 
 from rich.text import Text
@@ -6,6 +6,8 @@ from textual.widget import Widget
 
 # Braille dots give 2×4 sub-cell resolution per character.
 _DOTS = ((0x01, 0x08), (0x02, 0x10), (0x04, 0x20), (0x40, 0x80))
+PALETTE = ("cyan", "magenta", "yellow", "green", "#ff8c00", "#6495ed", "red", "white")
+_SHARED = -2  # a cell crossed by more than one series
 
 
 class LineChart(Widget):
@@ -20,6 +22,12 @@ class LineChart(Widget):
     def set_data(self, *series: list[float]) -> None:
         self.series = [list(s) for s in series]
         self.refresh()
+
+    def set_series(self, named: list[tuple[str, list[float]]]) -> None:
+        """Any number of labelled series, coloured from PALETTE (e.g. one per training run)."""
+        self.labels = [n for n, _ in named]
+        self.palette = [PALETTE[i % len(PALETTE)] for i in range(len(named))]
+        self.set_data(*[s for _, s in named])
 
     def render(self) -> Text:
         w, h = self.size.width, self.size.height
@@ -39,13 +47,13 @@ class LineChart(Widget):
         px_w, px_h = cols * 2, rows * 4
         grid = [[0] * cols for _ in range(rows)]
         owner = [[-1] * cols for _ in range(rows)]
+        longest = max(len(s) for s in self.series)  # shared epoch axis: shorter runs end earlier
         for si, s in enumerate(self.series):
             if not s:
                 continue
             pts = []
-            n = len(s)
             for i, v in enumerate(s):
-                x = 0 if n == 1 else round(i * (px_w - 1) / (n - 1))
+                x = 0 if longest == 1 else round(i * (px_w - 1) / (longest - 1))
                 y = round((hi - v) / (hi - lo) * (px_h - 1))
                 pts.append((x, y))
             # Connect consecutive points so the curve reads as a line.
@@ -56,18 +64,17 @@ class LineChart(Widget):
                     y = y0 + (y1 - y0) * k // steps
                     r, c = y // 4, x // 2
                     grid[r][c] |= _DOTS[y % 4][x % 2]
-                    owner[r][c] = si if owner[r][c] in (-1, si) else 2
+                    owner[r][c] = si if owner[r][c] in (-1, si) else _SHARED
         for r in range(rows):
             label = self.fmt.format(hi) if r == 0 else self.fmt.format(lo) if r == rows - 1 else ""
             out.append(f"{label:>{axis - 1}} ┤" if label else " " * (axis - 1) + " │", style="dim")
             for c in range(cols):
                 if grid[r][c]:
                     o = owner[r][c]
-                    out.append(chr(0x2800 + grid[r][c]), style=self.palette[o] if o < 2 else "white")
+                    out.append(chr(0x2800 + grid[r][c]), style="white" if o == _SHARED else self.palette[o])
                 else:
                     out.append(" ")
             if r < rows - 1:
                 out.append("\n")
-        n = max(len(s) for s in self.series)
-        out.append(f"\n{' ' * axis}epoch 1{('epoch ' + str(n)).rjust(max(0, cols - 7))}", style="dim")
+        out.append(f"\n{' ' * axis}epoch 1{('epoch ' + str(longest)).rjust(max(0, cols - 7))}", style="dim")
         return out

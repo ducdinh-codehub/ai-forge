@@ -70,6 +70,7 @@ PredictScreen #predict, ExportScreen #export { padding: 0 2; }
 #gen-row Input { width: 12; margin-right: 2; }
 #batch-section { height: auto; }
 #result { height: auto; margin: 1 0; padding: 1 2; background: $boost; min-height: 3; }
+#explanation { height: auto; max-height: 22; overflow-y: auto; padding: 0 2; margin-bottom: 1; display: none; }
 #predict-log, #export-log { height: 1fr; border: round $panel; margin-top: 1; }
 #formats { height: auto; max-height: 12; }
 
@@ -115,3 +116,17 @@ PredictScreen #predict, ExportScreen #export { padding: 0 2; }
 #eval-status { height: auto; }
 #eval-progress { margin: 1 0 0 0; }
 #eval-body { height: 1fr; margin-top: 1; }
+
+/* Compare runs ------------------------------------------------------------ */
+#cmp-runs { width: 46; padding: 0 1; border-right: tall $panel; }
+#cmp-hint { margin-bottom: 1; }
+#runs { height: 1fr; }
+#cmp-main { padding: 0 1; }
+#cmp-metric-row { height: auto; }
+#cmp-metric-row Label { margin: 1 1 0 0; }
+#cmp-metric-row Select { width: 34; }
+#cmp-chart { height: 1fr; min-height: 10; margin-top: 1; }
+#cmp-table { height: auto; max-height: 12; margin-top: 1; }
+
+/* Guided tour: the widget to use next ------------------------------------- */
+.tour-target { outline: heavy $foreground; }  /* contrasts with every button colour */

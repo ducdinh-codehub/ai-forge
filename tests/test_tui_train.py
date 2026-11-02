@@ -77,3 +77,28 @@ def test_train_screen_resumes_an_unfinished_run(tmp_path):
     asyncio.run(scenario())
     hist = ws.load_history("spiral")
     assert len(hist) == 1 and hist[0]["resumed_at"] == 2 and len(hist[0]["epochs"]) == 4
+
+
+def test_train_screen_loads_a_huggingface_dataset(tmp_path, hub):
+    ws = Workspace(tmp_path)
+    ws.save_spec(from_template("MLP classifier (tabular)", "iris"))
+
+    async def scenario():
+        app = AIForgeApp(tmp_path)
+        async with app.run_test(size=(140, 45)) as pilot:
+            await app.push_screen(TrainScreen("iris", finetune=False))
+            screen = app.screen
+            screen.query_one("#source").value = "hf"
+            await pilot.pause()
+            assert screen.query_one("#grp-hf").display and not screen.query_one("#grp-path").display
+            screen.query_one("#hf_name").value = "iris"
+            screen.query_one("#hf_target").value = "species"
+            screen.query_one("#load").press()
+            for _ in range(200):
+                await pilot.pause(0.05)
+                if screen.info:
+                    break
+            assert screen.info.class_names == ["setosa", "virginica"]
+            assert screen.data_cfg["name"] == "iris" and screen.data_cfg["split"] == "train"
+
+    asyncio.run(scenario())

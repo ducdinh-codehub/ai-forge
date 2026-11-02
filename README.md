@@ -17,7 +17,7 @@
 
 **Build, train and use your own AI models in the terminal, without writing any code.**
 
-![AIForge model library](https://raw.githubusercontent.com/ducdinh-codehub/ai-forge/main/docs/images/10-home.png)
+![AIForge demo: create, train and use a model in under a minute](https://raw.githubusercontent.com/ducdinh-codehub/ai-forge/main/docs/images/demo.gif)
 
 With the mouse or keyboard you can:
 
@@ -49,7 +49,8 @@ No PyTorch or Python knowledge needed. The built-in **Guide** (`g`) teaches the 
 
 ## 1. Install
 
-**You need:** Python 3.10+, about 2 GB of disk space (mostly PyTorch), and a terminal window
+**You need:** Python 3.10+, disk space for PyTorch (about 1 GB on macOS and Windows; several GB
+on Linux, or about 1 GB with the [CPU-only build](#cpu-only-install-linux-without-an-nvidia-gpu)), and a terminal window
 of at least **120 × 35**. A GPU is optional: NVIDIA (CUDA) and Apple Silicon (MPS) are used
 automatically.
 
@@ -57,6 +58,19 @@ automatically.
 pipx install aiforge-studio      # recommended (or: pip install aiforge-studio)
 aiforge                          # start the app
 ```
+
+#### CPU-only install (Linux without an NVIDIA GPU)
+
+On Linux, PyTorch comes with NVIDIA's GPU libraries by default: a download of **over 2 GB**.
+Without an NVIDIA GPU you don't need them. The CPU-only build is **about 200 MB**:
+
+```bash
+pipx install aiforge-studio --pip-args="--extra-index-url https://download.pytorch.org/whl/cpu"
+# or, in a virtual environment:
+pip install aiforge-studio --extra-index-url https://download.pytorch.org/whl/cpu
+```
+
+macOS and Windows already get the small build (Apple GPUs work with it), so this isn't needed there.
 
 <details>
 <summary>No pipx yet? / NVIDIA GPU stats / install from source</summary>
@@ -86,6 +100,8 @@ python3 -m venv .venv && .venv/bin/pip install -e .
 ## 2. Quick start: your first model in 5 minutes
 
 You'll teach a model to tell apart three spirals of points. The data is built in.
+On the first launch AIForge offers to walk you through these steps, highlighting what to press
+(restart the tour any time with `F2`).
 
 | Step | Do this |
 |---|---|
@@ -163,6 +179,10 @@ reset the output layer, and save under a **new name** so the original stays safe
 
 Give it a whole CSV or image folder for **batch prediction** (writes a CSV with predictions).
 
+**🔍 Explain** (`Ctrl+E`) shows *why* the model gave its answer: which features or words pushed
+it towards the answer (green) or away from it (red), and for images a heat map of where it looks.
+Command line: `aiforge explain spiral "0.1, 0.45"`.
+
 ### Evaluate: how good is it really?
 Press `v` (📊 **Evaluate**), choose the data (the validation / test data from training, or a
 separate file or folder with the true answers) and click **▶ Evaluate** (`Ctrl+R`). The report:
@@ -183,12 +203,19 @@ separate file or folder with the true answers) and click **▶ Evaluate** (`Ctrl
 **💾 Save report** writes it to `exports/<model>/` as Markdown and JSON. The home screen shows
 the last result. New to the metrics? Press `g` → **7. Is my model good?**
 
+### Compare: which run was best?
+Press `m` (**📈 Compare**). Tick training runs, of one model over time or of different models on
+the same data, to see their curves on one chart and a table of the best and last scores. Only the
+settings that differ are shown, so you see what made the difference; the best run gets a ★.
+Command line: `aiforge compare small big --metric val_acc`.
+
 ### Export
 | Format | Use it to… |
 |---|---|
 | AIForge bundle `.zip` | Back up or share with another AIForge user |
 | Weights `.pt` / `.safetensors` | Load in your own PyTorch / Hugging Face code |
 | PyTorch code `.py` · JSON · summary | Read, edit or document the model |
+| Training script `.py` | Re-train it with plain PyTorch: its data loading, settings and training loop, ready to edit |
 | TorchScript · ONNX | Run in C++, mobile, ONNX Runtime, TensorRT, browsers… |
 
 ### Serve: use it from a web page or another program
@@ -252,10 +279,21 @@ Sample files are under **📦 Examples** in the browser.
 
 | Kind | Format |
 |---|---|
-| **Table** (CSV) | One row per example. The **last column** is predicted (or choose another). Text columns and missing numbers are handled for you. |
-| **Text** (CSV) | A text column and a label column: `"great movie",pos` |
+| **Table** (CSV, Excel `.xlsx`, Parquet) | One row per example. The **last column** is predicted (or choose another). Text columns and missing numbers are handled for you. |
+| **Text** (table) | A text column and a label column: `"great movie",pos` |
 | **Images** | A folder with **one sub-folder per class** (`cat/`, `dog/`). Images are resized automatically. |
+| **Images listed in a table** | A column of image paths (relative to the table) and a label column: `photos/1.jpg,cat` |
 | **Plain text** (.txt) | Any text for a language model to imitate: a book, poems, lyrics, code. Split into characters or words. A short sample (`nursery_rhymes.txt`) is built in; aim for 1 MB+ for real sentences. |
+
+### Option C: any Hugging Face dataset
+
+Choose **Hugging Face dataset** as the source and type its name from
+[huggingface.co/datasets](https://huggingface.co/datasets), e.g. `imdb` or `uoft-cs/cifar10`
+(command line: `-d hf:imdb`). AIForge reads it as images, text or a table to suit your model,
+and keeps the dataset's class names.
+
+Excel, Parquet and Hugging Face need a few extra packages: `pipx inject aiforge-studio openpyxl pyarrow datasets`
+(or `pip install "aiforge-studio[data]"`).
 
 > **How much data?** For images, aim for 50–100+ per class. With fewer, use a
 > **Transfer learning** template.
@@ -306,10 +344,12 @@ New to the words (epoch, loss, overfitting…)? Press `g` → **🎓 ML basics**
 | `f` | Fine-tune | `Ctrl+D` | Duplicate layer | | |
 | `p` | Use | `Ctrl+Z` | Undo | | |
 | `v` | Evaluate | | | | |
+| `m` | Compare runs | | | | |
 | `x` | Export | `Ctrl+S` | Save | | |
 | `a` | Serve (web API) | | | | |
 | `s` | Datasets | `Ctrl+E` | Explain tab | | |
 | `g` | Guide | `?` | Full guide | | |
+| `F2` | Guided tour | | | | |
 | `w` `c` `r` `d` | Load weights · Duplicate · Rename · Delete | | | | |
 
 Everywhere: `Esc` back · `Tab` next · `Ctrl+P` command palette · `Ctrl+T` dark / light · `Ctrl+O` report a problem · `Ctrl+Q` quit.
@@ -374,6 +414,10 @@ aiforge list
 | Fine-tune into a new model | `aiforge train spiral -d moons --save-as moons` |
 | Train a tiny GPT and let it write | `aiforge train gpt -d poems.txt` then `aiforge generate gpt "Once upon"` |
 | Force full precision / load images with 4 processes | `--precision fp32` · `--workers 4` |
+| Train on a Hugging Face dataset | `aiforge train reviews -d hf:imdb` (`hf:NAME:SUBSET`, `--split test`) |
+| Train on an Excel file / a table of image paths | `-d sales.xlsx` · `-d photos.csv` (image models; `--image-column file`) |
+| Compare runs (best one gets a ★) | `aiforge compare small big --metric val_acc` (`--last 3`) |
+| See why it gave an answer | `aiforge explain fruit "6.1, 2.7, green"` |
 | Pick the CSV column to predict | `--target price` (text classifiers: also `--text-column review`) |
 | Stop early | `Ctrl+C`: stops after the current batch and keeps the best epoch |
 
@@ -525,11 +569,13 @@ aiforge/
 ├── sysinfo.py    hardware specs and live usage
 └── tui/          the Textual interface (one module per screen)
 docs/make_screenshots.py   regenerates the README screenshots
+docs/make_demo_gif.py      regenerates the demo animation at the top of this README
 ```
 
 **Tests:** `pip install -e ".[dev]" && pytest`
 
-**Release:** bump `__version__` in `aiforge/__init__.py`, merge to `main`, then push a matching tag
+**Release:** move the *Unreleased* notes in [CHANGELOG.md](CHANGELOG.md) under the new version, bump
+`__version__` in `aiforge/__init__.py`, merge to `main`, then push a matching tag
 (`git tag v0.1.9 && git push origin v0.1.9`). GitHub Actions builds it and publishes it to PyPI.
 Every pull request runs the tests on Linux, macOS and Windows first.
 

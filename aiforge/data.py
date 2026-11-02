@@ -16,17 +16,20 @@ from torch.utils.data import Dataset, Subset, TensorDataset, random_split
 
 SOURCES = {
     "synthetic": "Synthetic toy data (no files needed)",
-    "csv": "CSV table - numeric/categorical columns + a target column",
-    "csv_text": "CSV with a text column + label column (text classification)",
+    "csv": "Table (CSV, Excel, Parquet) - numeric/categorical columns + a target column",
+    "csv_text": "Table with a text column + label column (text classification)",
     "text_corpus": "Plain text file (.txt) - language model / text generation",
     "image_folder": "Image folder - one sub-folder per class",
+    "image_csv": "Images listed in a table - an image path column + a label column",
+    "hf": "Hugging Face dataset, by name (pip install datasets)",
     "mnist": "MNIST handwritten digits (auto-download, 28×28×1)",
     "fashion_mnist": "Fashion-MNIST clothing (auto-download, 28×28×1)",
     "cifar10": "CIFAR-10 objects (auto-download, 32×32×3)",
     "cifar100": "CIFAR-100 objects, 100 classes (auto-download, 32×32×3)",
 }
 SYNTHETIC = ["moons", "spirals", "circles", "blobs", "regression"]
-FILE_SOURCES = ("csv", "csv_text", "image_folder", "text_corpus")  # need a path
+FILE_SOURCES = ("csv", "csv_text", "image_folder", "image_csv", "text_corpus")  # need a path
+TABLE_EXT = {".csv", ".tsv", ".txt", ".xlsx", ".xlsm", ".parquet"}
 TORCHVISION = ("mnist", "fashion_mnist", "cifar10", "cifar100")
 IMAGE_EXT = {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp"}
 TEXT_EXT = {".txt", ".md", ".text"}
@@ -65,16 +68,18 @@ def load(cfg: dict, data_dir: Path, spec=None) -> tuple[Dataset, Dataset, DataIn
     if src == "synthetic":
         ds, info = _synthetic(cfg.get("kind", "moons"), int(cfg.get("samples", 2000)))
     elif src == "csv":
-        ds, info = _csv_table(Path(cfg["path"]).expanduser(), cfg.get("target") or None,
-                              cfg.get("task") or None)
+        path = Path(cfg["path"]).expanduser()
+        ds, info = _table(*read_table(path), path.name, cfg.get("target") or None, cfg.get("task") or None)
     elif src == "csv_text":
-        seq_len = int(spec.input_shape[0]) if spec and spec.input_dtype == "long" else 100
-        prev = spec.data.get("preprocess", {}) if spec else {}
-        ds, info = _csv_text(Path(cfg["path"]).expanduser(), cfg.get("target") or None,
-                             cfg.get("text_column") or None, seq_len, _vocab_size(spec),
-                             prev.get("vocab") if prev.get("type") == "text" else None)
+        path = Path(cfg["path"]).expanduser()
+        ds, info = _text_table(*read_table(path), path.name, cfg, spec)
     elif src == "image_folder":
         ds, info = _image_folder(Path(cfg["path"]).expanduser(), spec)
+    elif src == "image_csv":
+        ds, info = _image_csv(Path(cfg["path"]).expanduser(), cfg.get("target") or None,
+                              cfg.get("image_column") or None, spec)
+    elif src == "hf":
+        ds, info = _huggingface(cfg, spec)
     elif src == "text_corpus":
         return _text_corpus(Path(cfg["path"]).expanduser(), cfg.get("tokenizer") or "char", spec, val_split)
     elif src in TORCHVISION:
@@ -155,9 +160,40 @@ def _synthetic(kind: str, n: int):
 # ---------------------------------------------------------------------------
 
 
-def _read_csv(path: Path) -> tuple[list[str], list[list[str]]]:
+def _optional(module: str, what: str):
+    import importlib
+
+    try:
+        return importlib.import_module(module)
+    except ImportError:
+        raise ValueError(f"Reading {what} needs the '{module}' package: pip install {module} "
+                         "(or pip install \"aiforge-studio[data]\" for all data formats)") from None
+
+
+def _cell(v) -> str:
+    if v is None:
+        return ""
+    if isinstance(v, float) and v.is_integer():
+        return str(int(v))  # Excel stores 3 as 3.0; keep labels like "3" intact
+    return str(v)
+
+
+def read_table(path: Path) -> tuple[list[str], list[list[str]]]:
+    """Header and rows (all as text) of a CSV, Excel (.xlsx) or Parquet file."""
     if not path.exists():
         raise FileNotFoundError(f"File not found: {path}")
+    suffix = path.suffix.lower()
+    if suffix in (".xlsx", ".xlsm"):
+        openpyxl = _optional("openpyxl", "Excel files")
+        book = openpyxl.load_workbook(path, read_only=True, data_only=True)
+        rows = [[_cell(v) for v in r] for r in book.worksheets[0].iter_rows(values_only=True)]
+        book.close()
+        return _header_and_rows(rows)
+    if suffix == ".parquet":
+        pq = _optional("pyarrow.parquet", "Parquet files")
+        table = pq.read_table(path).to_pydict()
+        header = list(table)
+        return _header_and_rows([header] + [[_cell(v) for v in r] for r in zip(*table.values())])
     with path.open(newline="", encoding="utf-8-sig") as f:
         sample = f.read(4096)
         f.seek(0)
@@ -165,15 +201,21 @@ def _read_csv(path: Path) -> tuple[list[str], list[list[str]]]:
             dialect = csv.Sniffer().sniff(sample, delimiters=",;\t|")
         except csv.Error:
             dialect = csv.excel
-        rows = [r for r in csv.reader(f, dialect) if any(c.strip() for c in r)]
+        rows = list(csv.reader(f, dialect))
+    return _header_and_rows(rows)
+
+
+def _header_and_rows(rows: list[list[str]]) -> tuple[list[str], list[list[str]]]:
+    rows = [r for r in rows if any(c.strip() for c in r)]
     if len(rows) < 2:
-        raise ValueError("CSV needs a header row and at least one data row")
+        raise ValueError("The table needs a header row and at least one data row")
     return [h.strip() for h in rows[0]], rows[1:]
+
 
 
 def csv_columns(path: str) -> list[str]:
     try:
-        return _read_csv(Path(path).expanduser())[0]
+        return read_table(Path(path).expanduser())[0]
     except Exception:  # noqa: BLE001
         return []
 
@@ -186,8 +228,7 @@ def _is_num(v: str) -> bool:
         return False
 
 
-def _csv_table(path: Path, target: str | None, task: str | None):
-    header, rows = _read_csv(path)
+def _table(header: list[str], rows: list[list[str]], name: str, target: str | None, task: str | None):
     target = target or header[-1]
     if target not in header:
         raise ValueError(f"Target column '{target}' not in CSV columns: {', '.join(header)}")
@@ -231,8 +272,7 @@ def _csv_table(path: Path, target: str | None, task: str | None):
         "type": "tabular", "features": feats, "mean": mean.tolist(), "std": std.tolist(),
         "categorical": categorical, **({"target_mean": y_mean, "target_std": y_std}
                                        if task == "regression" else {})},
-        description=f"{path.name}: {len(rows)} rows, "
-                                                  f"{len(feats)} features, target '{target}'")
+        description=f"{name}: {len(rows)} rows, {len(feats)} features, target '{target}'")
     return TensorDataset(x, y), info
 
 
@@ -253,9 +293,13 @@ def encode_text(text: str, vocab: dict[str, int], seq_len: int) -> list[int]:
     return [0] * (seq_len - len(ids)) + ids
 
 
-def _csv_text(path: Path, target: str | None, text_col: str | None, seq_len: int,
-              vocab_size: int, vocab: dict[str, int] | None = None):
-    header, rows = _read_csv(path)
+def _text_table(header: list[str], rows: list[list[str]], name: str, cfg: dict, spec):
+    seq_len = int(spec.input_shape[0]) if spec and spec.input_dtype == "long" else 100
+    prev = spec.data.get("preprocess", {}) if spec else {}
+    # Keep an existing vocabulary when fine-tuning so the embeddings stay meaningful.
+    vocab = prev.get("vocab") if prev.get("type") == "text" else None
+    vocab_size = _vocab_size(spec)
+    target, text_col = cfg.get("target") or None, cfg.get("text_column") or None
     target = target or header[-1]
     text_col = text_col or next(h for h in header if h != target)
     for c in (target, text_col):
@@ -263,7 +307,7 @@ def _csv_text(path: Path, target: str | None, text_col: str | None, seq_len: int
             raise ValueError(f"Column '{c}' not in CSV columns: {', '.join(header)}")
     ti, xi = header.index(target), header.index(text_col)
     rows = [r for r in rows if len(r) == len(header)]
-    if vocab is None:  # keep an existing vocab when fine-tuning so embeddings stay meaningful
+    if vocab is None:
         counts = Counter(t for r in rows for t in tokenize(r[xi]))
         words = [w for w, _ in counts.most_common(max(0, vocab_size - 2))]
         vocab = {w: i + 2 for i, w in enumerate(words)}
@@ -272,7 +316,7 @@ def _csv_text(path: Path, target: str | None, text_col: str | None, seq_len: int
     y = torch.tensor([classes.index(r[ti].strip()) for r in rows])
     info = DataInfo([seq_len], "long", "classification", classes, {
         "type": "text", "vocab": vocab, "seq_len": seq_len, "vocab_size": vocab_size},
-        description=f"{path.name}: {len(rows)} texts, vocab {len(vocab) + 2}")
+        description=f"{name}: {len(rows)} texts, vocab {len(vocab) + 2}")
     return TensorDataset(x, y), info
 
 
@@ -386,6 +430,94 @@ class _ImageFiles(Dataset):
             return self.transform(im), label
 
 
+def _image_pre(spec) -> dict:
+    """Image size and normalisation for the model's input (ImageNet statistics for colour)."""
+    shape = list(spec.input_shape) if spec and len(spec.input_shape) == 3 else [3, 64, 64]
+    c = shape[0] if shape[0] in (1, 3) else 3
+    imagenet = c == 3
+    return {"type": "image", "size": shape[1:], "channels": c,
+            "mean": [0.485, 0.456, 0.406] if imagenet else [0.5],
+            "std": [0.229, 0.224, 0.225] if imagenet else [0.5]}
+
+
+def _image_csv(path: Path, target: str | None, image_col: str | None, spec):
+    """A table with an image path column (relative to the table's folder) and a label column."""
+    header, rows = read_table(path)
+    if image_col is None:
+        image_col = next((h for i, h in enumerate(header)
+                          if rows and Path(rows[0][i].strip()).suffix.lower() in IMAGE_EXT), None)
+        if image_col is None:
+            raise ValueError("No column of image paths found (values like cats/1.jpg) - choose the image column")
+    target = target or next(h for h in reversed(header) if h != image_col)
+    for c in (image_col, target):
+        if c not in header:
+            raise ValueError(f"Column '{c}' not in the table's columns: {', '.join(header)}")
+    ii, ti = header.index(image_col), header.index(target)
+    rows = [r for r in rows if len(r) == len(header) and r[ii].strip()]
+    classes = sorted({r[ti].strip() for r in rows})
+    items = [((path.parent / r[ii].strip()).expanduser(), classes.index(r[ti].strip())) for r in rows]
+    missing = [str(p) for p, _ in items if not p.exists()]
+    if missing:
+        raise FileNotFoundError(f"{len(missing)} image(s) listed in {path.name} don't exist, e.g. {missing[0]}")
+    pre = _image_pre(spec)
+    info = DataInfo([pre["channels"], *pre["size"]], "float", "classification", classes, pre,
+                    description=f"{path.name}: {len(items)} images, {len(classes)} classes")
+    return _ImageFiles(items, _image_transform(pre)), info
+
+
+class _HFImages(Dataset):
+    """Images stored inside a Hugging Face dataset, decoded when read."""
+
+    def __init__(self, ds, image_col: str, labels: list[int], transform):
+        self.ds, self.image_col, self.labels, self.transform = ds, image_col, labels, transform
+
+    def __len__(self):
+        return len(self.labels)
+
+    def __getitem__(self, i):
+        return self.transform(self.ds[int(i)][self.image_col]), self.labels[i]
+
+
+def _huggingface(cfg: dict, spec):
+    """Any dataset on the Hugging Face Hub, read as images, text or a table to suit the model."""
+    datasets = _optional("datasets", "Hugging Face datasets")
+    name = (cfg.get("name") or "").strip()
+    if not name:
+        raise ValueError("Enter a Hugging Face dataset name, e.g. imdb or uoft-cs/cifar10")
+    try:
+        ds = datasets.load_dataset(name, cfg.get("subset") or None, split=cfg.get("split") or "train")
+    except Exception as e:  # noqa: BLE001 - network, unknown name, missing subset...
+        raise ValueError(f"Couldn't load '{name}' from Hugging Face: {e}") from None
+    cols = list(ds.column_names)
+    kind = lambda c: type(ds.features[c]).__name__  # noqa: E731 - "Image", "ClassLabel", "Value"...
+    target = cfg.get("target") or next((c for c in ("label", "labels") if c in cols), None) \
+        or next((c for c in reversed(cols) if kind(c) == "ClassLabel"), cols[-1])
+    if target not in cols:
+        raise ValueError(f"Column '{target}' not in {name}: {', '.join(cols)}")
+    names = getattr(ds.features[target], "names", None)
+    labels = [names[v] if names and isinstance(v, int) and 0 <= v < len(names) else _cell(v) for v in ds[target]]
+    title = f"{name} ({cfg.get('split') or 'train'})"
+    if spec is not None and len(spec.input_shape) == 3:  # an image model
+        image_col = cfg.get("image_column") or next((c for c in cols if kind(c) == "Image"), None)
+        if image_col is None:
+            raise ValueError(f"{name} has no image column (columns: {', '.join(cols)})")
+        classes = sorted(set(labels), key=lambda v: (float(v) if _is_num(v) else 0, v)) if not names \
+            else [n for n in names if n in set(labels)]
+        pre = _image_pre(spec)
+        info = DataInfo([pre["channels"], *pre["size"]], "float", "classification", classes, pre,
+                        description=f"{title}: {len(labels)} images, {len(classes)} classes")
+        return _HFImages(ds, image_col, [classes.index(v) for v in labels], _image_transform(pre)), info
+    keep = [c for c in cols if kind(c) not in ("Image", "Audio")]
+    header = keep
+    columns = [labels if c == target else [_cell(v) for v in ds[c]] for c in keep]
+    rows = [list(r) for r in zip(*columns)]
+    if spec is not None and spec.input_dtype == "long":  # a text classifier
+        text_col = cfg.get("text_column") or next((c for c in keep if c != target and kind(c) == "Value"
+                                                   and ds.features[c].dtype == "string"), None)
+        return _text_table(header, rows, title, {**cfg, "target": target, "text_column": text_col}, spec)
+    return _table(header, rows, title, target, cfg.get("task") or None)
+
+
 def _image_folder(root: Path, spec):
     if not root.is_dir():
         raise FileNotFoundError(f"Folder not found: {root}")
@@ -396,14 +528,9 @@ def _image_folder(root: Path, spec):
              if p.suffix.lower() in IMAGE_EXT]
     if not items:
         raise ValueError("No images found (.png/.jpg/...)")
-    shape = list(spec.input_shape) if spec and len(spec.input_shape) == 3 else [3, 64, 64]
-    c = shape[0] if shape[0] in (1, 3) else 3
-    imagenet = c == 3
-    pre = {"type": "image", "size": shape[1:], "channels": c,
-           "mean": [0.485, 0.456, 0.406] if imagenet else [0.5],
-           "std": [0.229, 0.224, 0.225] if imagenet else [0.5]}
+    pre = _image_pre(spec)
     ds = _ImageFiles(items, _image_transform(pre))
-    info = DataInfo([c, *shape[1:]], "float", "classification", classes, pre,
+    info = DataInfo([pre["channels"], *pre["size"]], "float", "classification", classes, pre,
                     description=f"{root.name}: {len(items)} images, {len(classes)} classes")
     return ds, info
 
@@ -436,7 +563,7 @@ def decodes_per_sample(ds: Dataset) -> bool:
 
     while isinstance(ds, Subset):
         ds = ds.dataset
-    return isinstance(ds, (_ImageFiles, VisionDataset))
+    return isinstance(ds, (_ImageFiles, _HFImages, VisionDataset))
 
 
 AUTO_WORKERS_MIN_SAMPLES = 1000

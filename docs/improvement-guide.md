@@ -27,17 +27,17 @@ A prioritised plan for making AIForge sturdier and more useful. Tick items off a
 
 ## 3. Product
 
-- [ ] **Experiment comparison.** Overlay the curves of several runs or models on one chart.
-- [ ] **More data sources.** Excel / Parquet; any Hugging Face dataset by name; image datasets given
+- [x] **Experiment comparison.** Overlay the curves of several runs or models on one chart.
+- [x] **More data sources.** Excel / Parquet; any Hugging Face dataset by name; image datasets given
   as a CSV of paths + labels.
-- [ ] **Explain a prediction.** Feature importance (tables), saliency heatmap (images, as terminal
+- [x] **Explain a prediction.** Feature importance (tables), saliency heatmap (images, as terminal
   block art), highlighted tokens (text).
-- [ ] **"Training script" export.** A standalone `train.py` reproducing the run: data loading,
+- [x] **"Training script" export.** A standalone `train.py` reproducing the run: data loading,
   config and loop. The path from no-code to real code.
-- [ ] **Guided first run.** Offer the spirals quick start on first launch with on-screen highlights.
+- [x] **Guided first run.** Offer the spirals quick start on first launch with on-screen highlights.
 
 ## 4. Docs & distribution
 
-- [ ] Short GIF / asciinema demo at the top of the README.
-- [ ] `CHANGELOG.md`.
-- [ ] Document the CPU-only PyTorch install to cut the ~2 GB download for users without a GPU.
+- [x] Short GIF / asciinema demo at the top of the README.
+- [x] `CHANGELOG.md`.
+- [x] Document the CPU-only PyTorch install to cut the ~2 GB download for users without a GPU.
