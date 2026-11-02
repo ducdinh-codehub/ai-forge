@@ -13,7 +13,7 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader
 
-from .data import DataInfo
+from .data import DataInfo, loader_workers
 from .spec import ModelSpec
 
 
@@ -28,6 +28,8 @@ class TrainConfig:
     early_stop: int = 0  # patience in epochs, 0 = off
     device: str = "auto"
     max_samples: int = 0  # 0 = use everything
+    precision: str = "auto"  # auto | fp32 | bf16 | fp16 (see amp_dtype)
+    workers: int = -1  # background data-loading processes, -1 = auto (see data.loader_workers)
 
 
 def pick_device(pref: str = "auto") -> torch.device:
@@ -38,6 +40,22 @@ def pick_device(pref: str = "auto") -> torch.device:
     if torch.backends.mps.is_available():
         return torch.device("mps")
     return torch.device("cpu")
+
+
+PRECISIONS = {"auto": "auto", "fp32": "full fp32", "bf16": "mixed bf16", "fp16": "mixed fp16"}
+
+
+def amp_dtype(dev: torch.device, precision: str = "auto") -> torch.dtype | None:
+    """The 16-bit type to train in on ``dev`` (mixed precision), or None for full float32.
+
+    NVIDIA GPUs do most maths several times faster in 16 bits and need half the memory for
+    activations, so ``auto`` uses it there. Apple GPUs (MPS) and CPUs showed no speed-up, so
+    ``auto`` keeps float32 on them; ``bf16`` / ``fp16`` force it anywhere."""
+    if precision == "auto":
+        if dev.type == "cuda":
+            return torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+        return None
+    return {"bf16": torch.bfloat16, "fp16": torch.float16}.get(precision)
 
 
 def available_devices() -> list[str]:
@@ -172,11 +190,17 @@ class Trainer:
         c = self.cfg
         dev = pick_device(c.device)
         self.model.to(dev)
-        loader_kw = dict(batch_size=c.batch_size, num_workers=0)
+        workers = loader_workers(self.train_ds, c.workers)
+        # Workers stay alive between epochs: starting one re-imports PyTorch (seconds on macOS/Windows).
+        loader_kw = dict(batch_size=c.batch_size, num_workers=workers, persistent_workers=workers > 0,
+                         pin_memory=dev.type == "cuda")
         train_dl = DataLoader(self.train_ds, shuffle=True, drop_last=len(self.train_ds) > c.batch_size,
                               **loader_kw)
         val_dl = DataLoader(self.val_ds, shuffle=False, **loader_kw) if len(self.val_ds) else None
         loss_fn, opt = self._loss_fn(), self._optimizer()
+        amp = amp_dtype(dev, c.precision)
+        # float16 can round tiny gradients to 0; the scaler multiplies the loss up first (bfloat16 needn't).
+        scaler = torch.amp.GradScaler(dev.type, enabled=amp == torch.float16)
         sched = None
         if c.scheduler == "cosine":
             sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=max(1, c.epochs))
@@ -185,8 +209,10 @@ class Trainer:
 
         trainable = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
         total = sum(p.numel() for p in self.model.parameters())
-        self.on_log(f"Device: {dev} · trainable params {trainable:,} / {total:,} · "
-                    f"{len(self.train_ds):,} train / {len(self.val_ds):,} val samples")
+        speed = [f"mixed precision ({str(amp).removeprefix('torch.')})"] if amp else []
+        speed += [f"{workers} data workers"] if workers else []
+        self.on_log(f"Device: {dev}{''.join(f' · {x}' for x in speed)} · trainable params {trainable:,} / "
+                    f"{total:,} · {len(self.train_ds):,} train / {len(self.val_ds):,} val samples")
         best, bad, started, earlier = math.inf, 0, time.time(), 0.0
         first = 1
         if resume:
@@ -198,6 +224,8 @@ class Trainer:
             self.best_state = resume["best_state"]
             best, bad, first = resume["best"], resume["bad"], resume["epoch"] + 1
             started, earlier = resume["started"], resume["elapsed"]
+            if scaler.is_enabled() and resume.get("scaler"):
+                scaler.load_state_dict(resume["scaler"])
             if resume.get("rng") is not None:  # same shuffles and dropout as an uninterrupted run
                 torch.set_rng_state(resume["rng"])
             self.on_log(f"Resuming the interrupted run after epoch {resume['epoch']}/{c.epochs}.")
@@ -213,17 +241,20 @@ class Trainer:
                 if self.stopped:
                     break
                 done = step
-                x, y = x.to(dev), y.to(dev)
-                out = self.model(x)
-                if lm:
-                    loss = lm_loss(out, y, loss_fn)
-                else:
-                    loss = loss_fn(out, y.float() if self.spec.task == "regression" else y)
+                x, y = x.to(dev, non_blocking=True), y.to(dev, non_blocking=True)
+                with torch.autocast(dev.type, dtype=amp, enabled=amp is not None):
+                    out = self.model(x)
+                    if lm:
+                        loss = lm_loss(out, y, loss_fn)
+                    else:
+                        loss = loss_fn(out, y.float() if self.spec.task == "regression" else y)
                 opt.zero_grad(set_to_none=True)
-                loss.backward()
+                scaler.scale(loss).backward()
                 if lm:  # deep Transformers trained from scratch can take the odd huge step
+                    scaler.unscale_(opt)  # clip the real gradients, not the scaled-up ones
                     nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
-                opt.step()
+                scaler.step(opt)  # skipped when float16 overflowed; the scale then shrinks
+                scaler.update()
                 n = x.shape[0]
                 run_loss += loss.item() * n
                 seen += n
@@ -245,7 +276,7 @@ class Trainer:
                 rec["train_token_acc"] = run_correct / max(1, seen)
                 rec["train_ppl"] = perplexity(rec["train_loss"])
             if val_dl:
-                rec.update(evaluate(self.model, val_dl, self.spec.task, dev, loss_fn, self.target_std))
+                rec.update(evaluate(self.model, val_dl, self.spec.task, dev, loss_fn, self.target_std, amp))
             if lm and self.preprocess.get("vocab"):
                 from .textgen import generate
 
@@ -271,6 +302,7 @@ class Trainer:
                     "best_state": self.best_state, "best": best, "bad": bad, "epochs": self.epochs,
                     "started": started, "elapsed": earlier + time.time() - t_start,
                     "rng": torch.get_rng_state(),
+                    "scaler": scaler.state_dict() if scaler.is_enabled() else None,
                     "meta": self.checkpoint_meta})
             if early:
                 self.on_log(f"Early stopping: no improvement for {bad} epochs.")
@@ -305,13 +337,16 @@ def perplexity(loss: float) -> float:
 
 
 @torch.no_grad()
-def evaluate(model: nn.Module, loader, task: str, dev, loss_fn=None, target_std: float = 1.0) -> dict:
+def evaluate(model: nn.Module, loader, task: str, dev, loss_fn=None, target_std: float = 1.0,
+             amp: torch.dtype | None = None) -> dict:
     model.eval()
     loss_fn = loss_fn or (nn.MSELoss() if task == "regression" else nn.CrossEntropyLoss())
     tot, correct, n, abs_err = 0.0, 0, 0, 0.0
     for x, y in loader:
         x, y = x.to(dev), y.to(dev)
-        out = model(x)
+        with torch.autocast(dev.type, dtype=amp, enabled=amp is not None):
+            out = model(x)
+        out = out.float()  # metrics in full precision
         if task == "language_model":
             tot += lm_loss(out, y, loss_fn).item() * x.shape[0]
             correct += (out.argmax(-1) == y).float().mean(1).sum().item()

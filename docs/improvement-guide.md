@@ -19,7 +19,7 @@ A prioritised plan for making AIForge sturdier and more useful. Tick items off a
 
 - [x] **Resume / pause.** Checkpoint model + optimizer + scheduler + epoch every epoch; offer
   "Resume" when a run was interrupted.
-- [ ] **Speed.** "Auto" mixed precision (`torch.autocast`) on CUDA/MPS; `num_workers > 0` for image
+- [x] **Speed.** "Auto" mixed precision (`torch.autocast`) on CUDA/MPS; `num_workers > 0` for image
   folders (currently hard-coded to 0 in `trainer.py`).
 - [ ] **Learning-rate finder.** One button that sweeps the LR for a few hundred steps and suggests a value.
 - [ ] **Mini sweep.** Try a few learning rates / batch sizes, compare side by side, keep the best.

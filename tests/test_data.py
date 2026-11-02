@@ -1,7 +1,10 @@
 """Loading data: toy sets, CSV tables and text, plain text corpora, images, and raw prediction input."""
+import pickle
+
 import pytest
 import torch
 from PIL import Image
+from torch.utils.data import Subset, TensorDataset
 
 from aiforge import EXAMPLES_DIR
 from aiforge import data as datamod
@@ -90,3 +93,30 @@ def test_prepare_tabular_input():
         prepare_input(spec, "1, 2")
     with pytest.raises(ValueError, match="not a known value"):
         prepare_input(spec, "1, 2, blue")
+
+
+def _image_items(tmp_path, n):
+    Image.new("RGB", (8, 8)).save(tmp_path / "a.png")
+    return [(tmp_path / "a.png", 0)] * n
+
+
+def test_auto_workers_only_for_enough_images_on_linux(tmp_path, monkeypatch):
+    pre = {"size": [8, 8], "channels": 3, "mean": [0.5] * 3, "std": [0.5] * 3}
+    big = Subset(datamod._ImageFiles(_image_items(tmp_path, 2000), datamod._image_transform(pre)), range(1500))
+    small = datamod._ImageFiles(_image_items(tmp_path, 50), datamod._image_transform(pre))
+    tensors = TensorDataset(torch.zeros(5000, 2))
+    monkeypatch.setattr(datamod.os, "cpu_count", lambda: 8)
+
+    monkeypatch.setattr(datamod.sys, "platform", "linux")
+    assert datamod.loader_workers(big) == 4
+    assert datamod.loader_workers(small) == 0 and datamod.loader_workers(tensors) == 0
+    monkeypatch.setattr(datamod.sys, "platform", "darwin")  # workers start and stop slowly there
+    assert datamod.loader_workers(big) == 0
+    assert datamod.loader_workers(tensors, requested=2) == 2  # an explicit choice always wins
+
+
+def test_image_dataset_can_go_to_worker_processes(tmp_path):
+    pre = {"size": [8, 8], "channels": 3, "mean": [0.5] * 3, "std": [0.5] * 3}
+    ds = Subset(datamod._ImageFiles(_image_items(tmp_path, 4), datamod._image_transform(pre)), range(2))
+    copy = pickle.loads(pickle.dumps(ds))  # what spawn does for every worker
+    assert torch.equal(copy[0][0], ds[0][0])

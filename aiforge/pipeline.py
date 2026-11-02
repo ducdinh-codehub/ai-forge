@@ -169,7 +169,7 @@ def _resume(ws, name, data, cfg, ck, on_log, on_batch, on_epoch, on_trainer):
     if probs := data_mismatch(spec, data.info):
         raise ValueError(f"The data doesn't match the interrupted run: {probs[0]}")
     # The original settings, so the learning-rate schedule and epoch count carry on unchanged.
-    cfg = TrainConfig(**{**ck["config"], "device": cfg.device})
+    cfg = TrainConfig(**{**ck["config"], "device": cfg.device, "workers": cfg.workers})
     model = spec.build()
     spec.apply_freeze(model)
     save_as = meta["save_as"] or name

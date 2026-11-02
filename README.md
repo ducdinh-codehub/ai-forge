@@ -135,6 +135,8 @@ Mistakes show up in red right away. Layers you don't change **keep what they lea
    | Learning rate | Step size: too high = unstable, too low = slow | 0.001 |
    | Early stop | Stop after N epochs with no improvement (0 = off) | 0 or 5 |
    | Device | CPU or GPU | auto |
+   | Precision | `auto` trains in mixed 16-bit precision on NVIDIA GPUs: often 2–3× faster | auto |
+   | Data workers | Processes that load images in the background (`auto`: Linux, 1,000+ images) | auto |
 
 3. Click **▶ Start** (`Ctrl+R`). Watch the charts, the log and the **💻 This computer** panel
    (CPU, RAM, GPU usage, samples/s).
@@ -371,6 +373,7 @@ aiforge list
 | Continue from the saved weights (no unfinished run) | `aiforge train spiral --resume -e 20` |
 | Fine-tune into a new model | `aiforge train spiral -d moons --save-as moons` |
 | Train a tiny GPT and let it write | `aiforge train gpt -d poems.txt` then `aiforge generate gpt "Once upon"` |
+| Force full precision / load images with 4 processes | `--precision fp32` · `--workers 4` |
 | Pick the CSV column to predict | `--target price` (text classifiers: also `--text-column review`) |
 | Stop early | `Ctrl+C`: stops after the current batch and keeps the best epoch |
 

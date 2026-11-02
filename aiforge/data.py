@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import csv
 import math
+import os
 import re
+import sys
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -350,6 +352,11 @@ def _text_corpus(path: Path, tokenizer: str, spec, val_split: float):
 # ---------------------------------------------------------------------------
 
 
+def _to_rgb(im):
+    # A plain function, not a lambda: background loader workers must be able to pickle it.
+    return im.convert("RGB")
+
+
 def _image_transform(pre: dict, train: bool = False):
     from torchvision import transforms as T
 
@@ -357,7 +364,7 @@ def _image_transform(pre: dict, train: bool = False):
     if pre["channels"] == 1:
         ops.append(T.Grayscale(1))
     else:
-        ops.append(T.Lambda(lambda im: im.convert("RGB")))
+        ops.append(T.Lambda(_to_rgb))
     if train and pre.get("augment"):
         ops.append(T.RandomHorizontalFlip())
     ops += [T.ToTensor(), T.Normalize(pre["mean"], pre["std"])]
@@ -420,6 +427,33 @@ def _torchvision(name: str, data_dir: Path, spec):
                     n_train=len(train), n_val=len(val),
                     description=f"{name}: {len(train)} train / {len(val)} test images")
     return train, val, info
+
+
+def decodes_per_sample(ds: Dataset) -> bool:
+    """True when every sample is read and transformed on the fly (image files, torchvision sets):
+    then background loader workers speed training up. In-memory tensors and text gain nothing."""
+    from torchvision.datasets import VisionDataset
+
+    while isinstance(ds, Subset):
+        ds = ds.dataset
+    return isinstance(ds, (_ImageFiles, VisionDataset))
+
+
+AUTO_WORKERS_MIN_SAMPLES = 1000
+
+
+def loader_workers(ds: Dataset, requested: int = -1) -> int:
+    """Background processes for loading ``ds``: ``requested`` if >= 0, else picked automatically.
+
+    Workers decode images in parallel with training, but each one has a fixed cost. On macOS and
+    Windows a worker starts by re-importing PyTorch and takes ~5 s to shut down, which outweighs
+    the gain on most runs, so ``auto`` only uses them on Linux, for enough image data."""
+    if requested >= 0:
+        return requested
+    if not (sys.platform.startswith("linux") and decodes_per_sample(ds)
+            and len(ds) >= AUTO_WORKERS_MIN_SAMPLES):
+        return 0
+    return max(0, min(4, (os.cpu_count() or 1) - 1))
 
 
 def limit(ds: Dataset, n: int | None) -> Dataset:
