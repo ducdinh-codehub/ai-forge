@@ -1,6 +1,7 @@
 name: Publish to PyPI
 
-# Push a tag like v0.1.8 to publish that version. The tag must match aiforge.__version__.
+# Push a tag like v0.1.8 to publish that version to PyPI and create its GitHub Release.
+# The tag must match aiforge.__version__ and CHANGELOG.md must have a section for it.
 # One-time setup on PyPI: project aiforge-studio → Publishing → add a trusted publisher
 # (owner ducdinh-codehub, repo ai-forge, workflow release.yml, environment pypi).
 on:
@@ -13,6 +14,7 @@ jobs:
     environment: pypi
     permissions:
       id-token: write  # trusted publishing: no API token stored in GitHub
+      contents: write  # create the GitHub Release
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -24,6 +26,17 @@ jobs:
           if [ "v$version" != "$GITHUB_REF_NAME" ]; then
             echo "Tag $GITHUB_REF_NAME doesn't match __version__ $version"; exit 1
           fi
+      - name: Check the CHANGELOG has notes for this version
+        run: python .github/scripts/release_notes.py "$GITHUB_REF_NAME" > notes.md
       - run: pip install build
       - run: python -m build
       - uses: pypa/gh-action-pypi-publish@release/v1
+      - name: Create the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            echo "Release $GITHUB_REF_NAME already exists"; exit 0
+          fi
+          gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --latest \
+            --title "AIForge ${GITHUB_REF_NAME#v}" --notes-file notes.md
