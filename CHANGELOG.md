@@ -22,6 +22,8 @@ and versions follow [Semantic Versioning](https://semver.org/) (still `0.x`: any
   model looks.
 - **Compare runs.** 📈 Compare (`m`) and `aiforge compare`: the curves of several runs or models on
   one chart, with a table of best and last scores and only the settings that differ.
+- **Guided first run.** On the first launch, a 5-minute tour of the quick start: a coach bar says
+  what to do next and outlines the button to press; each step ends by itself when it is done (`F2`).
 - Tests for the core modules: every template builds, exports to ONNX and TorchScript, and round-trips.
 - `docs/improvement-guide.md`: the roadmap.
 - Docs: CPU-only install (a ~200 MB PyTorch instead of ~2 GB).

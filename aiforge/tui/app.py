@@ -26,6 +26,7 @@ class AIForgeApp(App):
         self.ws = Workspace(workspace)
         self.errors = feedback.ErrorLog()  # attached to bug reports
         self.last_crash: str | None = None
+        self.tour = None  # the guided first run, while it is on
 
     def on_mount(self) -> None:
         self.sub_title = f"workspace: {self.ws.root}"
@@ -39,6 +40,11 @@ class AIForgeApp(App):
         if self.last_crash:
             self.notify("AIForge closed because of an error last time. Press [b]Ctrl+O[/b] to report it - "
                         "the error details are filled in for you.", severity="warning", timeout=20)
+
+    def action_tour(self) -> None:
+        from .tour import start
+
+        start(self)
 
     def action_toggle_theme(self) -> None:
         self.theme = LIGHT_THEME if self.current_theme.dark else DARK_THEME
@@ -58,6 +64,8 @@ class AIForgeApp(App):
         yield from super().get_system_commands(screen)
         yield SystemCommand("Report a problem or idea", "Open a GitHub issue with the details filled in",
                             self.action_report_issue)
+        yield SystemCommand("Take the guided tour", "Build, train and use a first model, step by step",
+                            self.action_tour)
 
     def _current_spec(self):
         """The model the user is looking at, so a report can include its structure."""

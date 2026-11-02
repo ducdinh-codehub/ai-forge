@@ -100,6 +100,8 @@ python3 -m venv .venv && .venv/bin/pip install -e .
 ## 2. Quick start: your first model in 5 minutes
 
 You'll teach a model to tell apart three spirals of points. The data is built in.
+On the first launch AIForge offers to walk you through these steps, highlighting what to press
+(restart the tour any time with `F2`).
 
 | Step | Do this |
 |---|---|
@@ -347,6 +349,7 @@ New to the words (epoch, loss, overfitting…)? Press `g` → **🎓 ML basics**
 | `a` | Serve (web API) | | | | |
 | `s` | Datasets | `Ctrl+E` | Explain tab | | |
 | `g` | Guide | `?` | Full guide | | |
+| `F2` | Guided tour | | | | |
 | `w` `c` `r` `d` | Load weights · Duplicate · Rename · Delete | | | | |
 
 Everywhere: `Esc` back · `Tab` next · `Ctrl+P` command palette · `Ctrl+T` dark / light · `Ctrl+O` report a problem · `Ctrl+Q` quit.

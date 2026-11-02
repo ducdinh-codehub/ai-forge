@@ -127,3 +127,6 @@ PredictScreen #predict, ExportScreen #export { padding: 0 2; }
 #cmp-metric-row Select { width: 34; }
 #cmp-chart { height: 1fr; min-height: 10; margin-top: 1; }
 #cmp-table { height: auto; max-height: 12; margin-top: 1; }
+
+/* Guided tour: the widget to use next ------------------------------------- */
+.tour-target { outline: heavy $foreground; }  /* contrasts with every button colour */

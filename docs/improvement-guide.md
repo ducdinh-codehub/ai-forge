@@ -34,7 +34,7 @@ A prioritised plan for making AIForge sturdier and more useful. Tick items off a
   block art), highlighted tokens (text).
 - [x] **"Training script" export.** A standalone `train.py` reproducing the run: data loading,
   config and loop. The path from no-code to real code.
-- [ ] **Guided first run.** Offer the spirals quick start on first launch with on-screen highlights.
+- [x] **Guided first run.** Offer the spirals quick start on first launch with on-screen highlights.
 
 ## 4. Docs & distribution
 

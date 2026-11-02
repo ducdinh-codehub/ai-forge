@@ -30,8 +30,7 @@ Build, train and share neural networks - no code needed.
 Already have a model? Press [reverse] i [/reverse] to import it.
 Found a bug or have an idea? Press [reverse] Ctrl+O [/reverse] to tell us on GitHub.
 
-[dim]New here? Press [b]g[/b] to read the beginner lessons, or press [b]n[/b], keep the
-default template, then press [b]t[/b] and train on the built-in "spirals" toy data.[/dim]"""
+[dim]New here? Press [b]F2[/b] for a 5-minute guided tour, or [b]g[/b] for the beginner lessons.[/dim]"""
 
 
 class HomeScreen(Screen):
@@ -52,6 +51,7 @@ class HomeScreen(Screen):
         Binding("c", "duplicate", "Duplicate", show=False),
         Binding("r", "rename", "Rename", show=False),
         Binding("delete,d", "delete", "Delete", show=False),
+        Binding("f2", "app.tour", "Guided tour", show=False),
         Binding("q", "app.quit", "Quit"),
     ]
 
@@ -93,6 +93,9 @@ class HomeScreen(Screen):
         self.app.theme_changed_signal.subscribe(self, lambda _: self._sync_theme_button())
         t.add_columns("Name", "Task", "Layers", "Params", "Weights", "Epochs", "Modified")
         self.refresh_models()
+        from .tour import offer
+
+        offer(self)
 
     def _theme_label(self) -> str:
         # The button names the theme it switches *to*.
