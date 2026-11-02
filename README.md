@@ -139,6 +139,11 @@ Mistakes show up in red right away. Layers you don't change **keep what they lea
 3. Click **▶ Start** (`Ctrl+R`). Watch the charts, the log and the **💻 This computer** panel
    (CPU, RAM, GPU usage, samples/s).
 
+**Pause and resume:** **■ Stop** saves the best epoch so far, and the run can be continued later.
+If training stops early (Stop, a crash, closing the app), the Train screen shows **⏯ Resume**:
+the run carries on from its last finished epoch with the same data and settings, as if it had
+never stopped. **▶ Start** begins a new run instead.
+
 Press **F1** for the **📖 Guide panel**: a live diagnosis of your run ("✅ healthy",
 "⚠️ overfitting…") and every setting explained with your values.
 
@@ -334,6 +339,7 @@ exists, or `aiforge -w <folder>` / `AIFORGE_WORKSPACE`).
 ```
 AIForge/
 ├── models/<name>/     spec.json (structure) · weights.pt · history.json · evaluations.json
+│                      (+ checkpoint.pt while a run is unfinished, to resume it)
 ├── exports/           files created by Export and saved evaluation reports
 ├── data/              downloaded datasets (data/hub/ for the dataset hub)
 └── settings.json      your preferences
@@ -361,7 +367,8 @@ aiforge list
 | I want to… | Do this |
 |---|---|
 | Train again on the same data | `aiforge train spiral -e 20` (leave out `-d`) |
-| Continue from the saved weights | `aiforge train spiral --resume -e 20` |
+| Continue a stopped run (Ctrl+C, crash) where it left off | `aiforge train spiral --resume` |
+| Continue from the saved weights (no unfinished run) | `aiforge train spiral --resume -e 20` |
 | Fine-tune into a new model | `aiforge train spiral -d moons --save-as moons` |
 | Train a tiny GPT and let it write | `aiforge train gpt -d poems.txt` then `aiforge generate gpt "Once upon"` |
 | Pick the CSV column to predict | `--target price` (text classifiers: also `--text-column review`) |

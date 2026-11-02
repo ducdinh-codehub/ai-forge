@@ -6,6 +6,7 @@ import math
 import threading
 import time
 from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import Callable
 
 import torch
@@ -92,6 +93,28 @@ def data_mismatch(spec: ModelSpec, info: DataInfo) -> list[str]:
     return probs
 
 
+CHECKPOINT = "checkpoint.pt"  # in the model folder while a run is unfinished
+CHECKPOINT_VERSION = 1
+
+
+def save_checkpoint(path: Path, state: dict) -> None:
+    """Write via a temporary file so a crash mid-write never leaves a broken checkpoint."""
+    tmp = path.with_name(path.name + ".tmp")
+    torch.save(state, tmp)
+    tmp.replace(path)
+
+
+def load_checkpoint(path: Path) -> dict | None:
+    """The interrupted run saved at ``path``, or None when there is none (or it can't be read)."""
+    if not path.exists():
+        return None
+    try:
+        state = torch.load(path, map_location="cpu", weights_only=True)
+    except Exception:  # noqa: BLE001 - a damaged checkpoint just means "nothing to resume"
+        return None
+    return state if isinstance(state, dict) and state.get("version") == CHECKPOINT_VERSION else None
+
+
 def lm_loss(out, y, loss_fn):
     """Cross-entropy over every position: (batch, seq, vocab) vs (batch, seq)."""
     return loss_fn(out.reshape(-1, out.shape[-1]), y.reshape(-1))
@@ -104,8 +127,11 @@ class Trainer:
                  on_log: Callable[[str], None] = print,
                  on_batch: Callable[[int, int, int, float], None] | None = None,
                  on_epoch: Callable[[dict], None] | None = None, target_std: float = 1.0,
-                 preprocess: dict | None = None):
+                 preprocess: dict | None = None, checkpoint: Path | None = None,
+                 checkpoint_meta: dict | None = None):
         self.spec, self.model, self.cfg = spec, model, cfg
+        # Saved after every epoch so an interrupted run can continue; removed when the run finishes.
+        self.checkpoint, self.checkpoint_meta = checkpoint, checkpoint_meta or {}
         self.train_ds, self.val_ds = train_ds, val_ds
         self.on_log, self.on_batch, self.on_epoch = on_log, on_batch, on_epoch
         self.target_std = target_std  # report regression error in the original units
@@ -141,7 +167,8 @@ class Trainer:
             if layer.id in self.spec.frozen:
                 mod.eval()
 
-    def run(self) -> dict:
+    def run(self, resume: dict | None = None) -> dict:
+        """Train; ``resume`` is a checkpoint (see load_checkpoint) to continue instead of starting over."""
         c = self.cfg
         dev = pick_device(c.device)
         self.model.to(dev)
@@ -160,16 +187,32 @@ class Trainer:
         total = sum(p.numel() for p in self.model.parameters())
         self.on_log(f"Device: {dev} · trainable params {trainable:,} / {total:,} · "
                     f"{len(self.train_ds):,} train / {len(self.val_ds):,} val samples")
-        best, bad, started = math.inf, 0, time.time()
+        best, bad, started, earlier = math.inf, 0, time.time(), 0.0
+        first = 1
+        if resume:
+            self.model.load_state_dict(resume["model"])
+            opt.load_state_dict(resume["optimizer"])
+            if sched and resume.get("scheduler"):
+                sched.load_state_dict(resume["scheduler"])
+            self.epochs = list(resume["epochs"])
+            self.best_state = resume["best_state"]
+            best, bad, first = resume["best"], resume["bad"], resume["epoch"] + 1
+            started, earlier = resume["started"], resume["elapsed"]
+            if resume.get("rng") is not None:  # same shuffles and dropout as an uninterrupted run
+                torch.set_rng_state(resume["rng"])
+            self.on_log(f"Resuming the interrupted run after epoch {resume['epoch']}/{c.epochs}.")
+        resumed_at = resume["epoch"] if resume else None
+        t_start, complete = time.time(), False
         steps = len(train_dl)
         lm = self.spec.task == "language_model"
-        for epoch in range(1, c.epochs + 1):
+        for epoch in range(first, c.epochs + 1):
             self._set_train_mode()
-            run_loss, run_correct, seen = 0.0, 0, 0
+            run_loss, run_correct, seen, done = 0.0, 0, 0, 0
             t0 = time.time()
             for step, (x, y) in enumerate(train_dl, 1):
                 if self.stopped:
                     break
+                done = step
                 x, y = x.to(dev), y.to(dev)
                 out = self.model(x)
                 if lm:
@@ -217,24 +260,43 @@ class Trainer:
                 self.best_state = {k: v.detach().cpu().clone() for k, v in self.model.state_dict().items()}
             else:
                 bad += 1
-                if c.early_stop and bad >= c.early_stop:
-                    self.on_log(f"Early stopping: no improvement for {bad} epochs.")
-                    break
+            early = bool(c.early_stop and bad >= c.early_stop)
+            complete = early or (epoch == c.epochs and done == steps)
+            # A stopped, half-done epoch isn't checkpointed: resuming repeats it in full.
+            if self.checkpoint and not complete and done == steps:
+                save_checkpoint(self.checkpoint, {
+                    "version": CHECKPOINT_VERSION, "epoch": epoch, "config": asdict(c),
+                    "model": self.model.state_dict(), "optimizer": opt.state_dict(),
+                    "scheduler": sched.state_dict() if sched else None,
+                    "best_state": self.best_state, "best": best, "bad": bad, "epochs": self.epochs,
+                    "started": started, "elapsed": earlier + time.time() - t_start,
+                    "rng": torch.get_rng_state(),
+                    "meta": self.checkpoint_meta})
+            if early:
+                self.on_log(f"Early stopping: no improvement for {bad} epochs.")
+                break
             if self.stopped:
                 break
+        can_resume = bool(self.checkpoint and not complete and self.checkpoint.exists())
         if self.stopped:
-            self.on_log("Training stopped by user.")
+            self.on_log("Training stopped by user." +
+                        (" Resume it later to continue where it left off." if can_resume else ""))
+        if self.checkpoint and not can_resume:
+            self.checkpoint.unlink(missing_ok=True)  # finished: nothing left to resume
         self.model.cpu()
         if self.best_state is not None:
             self.model.load_state_dict(self.best_state)
-        return {
+        run = {
             "started": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(started)),
-            "duration_s": round(time.time() - started, 1),
+            "duration_s": round(earlier + time.time() - t_start, 1),
             "config": asdict(c),
             "epochs": self.epochs,
             "best_score": best if best < math.inf else None,
             "stopped": self.stopped,
         }
+        if resumed_at is not None:
+            run["resumed_at"] = resumed_at
+        return run
 
 
 def perplexity(loss: float) -> float:

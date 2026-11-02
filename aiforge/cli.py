@@ -64,7 +64,8 @@ def add_commands(parser: argparse.ArgumentParser, common: argparse.ArgumentParse
     t.add_argument("--early-stop", type=int, default=0, metavar="EPOCHS",
                    help="Stop after this many epochs without improvement (0 = off)")
     t.add_argument("--device", default="auto", help="auto, cpu, cuda or mps")
-    t.add_argument("--resume", action="store_true", help="Continue from the saved weights")
+    t.add_argument("--resume", action="store_true",
+                   help="Continue the last interrupted run where it stopped, or else start from the saved weights")
     t.add_argument("--save-as", metavar="NAME",
                    help="Fine-tune: start from the saved weights and save as a new model")
     t.add_argument("--no-auto-fit", action="store_true",
@@ -226,25 +227,41 @@ def _epoch_line(r: dict) -> str:
 
 def cmd_train(ws, args) -> int:
     from . import pipeline
+    from .spec import ModelSpec
     from .trainer import TrainConfig
 
     _need_model(ws, args.model)
     spec = ws.load_spec(args.model)
     opts = dict(source=args.source, target=args.target, text_column=args.text_column,
                 tokenizer=args.tokenizer, val_split=args.val_split)
-    if args.data:
+    cfg = TrainConfig(epochs=args.epochs, batch_size=args.batch_size, lr=args.lr, optimizer=args.optimizer,
+                      weight_decay=args.weight_decay, scheduler=args.scheduler, early_stop=args.early_stop,
+                      device=args.device, max_samples=args.max_samples)
+    ck = pipeline.interrupted_run(ws, args.model)
+    if ck and args.resume:
+        if problem := pipeline.resume_problem(ws, args.model, ck):
+            raise CLIError(problem)
+        if args.data or args.save_as:
+            raise CLIError("--resume continues the interrupted run with its own data and name - "
+                           "leave out --data and --save-as")
+        # Same data, split and settings as before; only the device may change.
+        spec = ModelSpec.from_dict(ck["meta"]["spec"])
+        data_cfg = ck["meta"]["data_cfg"]
+        cfg = TrainConfig(**{**ck["config"], "device": args.device})
+        out.print(f"Continuing the interrupted run after epoch {ck['epoch']}/{cfg.epochs}")
+    elif args.data:
         data_cfg = pipeline.data_cfg_from_arg(args.data, spec, **opts)
     elif spec.data.get("dataset_cfg"):
         data_cfg = {**spec.data["dataset_cfg"], **{k: v for k, v in opts.items() if v is not None}}
     else:
         raise CLIError(f"'{args.model}' hasn't been trained before - say which data with --data")
-    cfg = TrainConfig(epochs=args.epochs, batch_size=args.batch_size, lr=args.lr, optimizer=args.optimizer,
-                      weight_decay=args.weight_decay, scheduler=args.scheduler, early_stop=args.early_stop,
-                      device=args.device, max_samples=args.max_samples)
+    if ck and not args.resume:
+        out.print(f"[yellow]'{args.model}' has an unfinished run (epoch {ck['epoch']}/{ck['config']['epochs']}) - "
+                  "starting over. Use --resume to continue it instead.[/]")
     pipeline.check_config(cfg)
 
     with out.status("Loading data… (built-in datasets download on first use)"):
-        data = pipeline.load_data(ws, spec, data_cfg, args.max_samples)
+        data = pipeline.load_data(ws, spec, data_cfg, cfg.max_samples)
     info = data.info
     out.print(f"[green]✓[/] {info.description}\n"
               f"  input {tuple(info.input_shape)} {info.input_dtype} · {info.task} · "

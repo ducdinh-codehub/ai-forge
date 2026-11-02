@@ -35,3 +35,45 @@ def test_train_screen_saves_class_names(tmp_path):
     asyncio.run(scenario())
     assert ws.load_history("reviews"), "training didn't finish"
     assert ws.load_spec("reviews").class_names == ["neg", "pos"]
+
+
+def test_train_screen_resumes_an_unfinished_run(tmp_path):
+    from aiforge import pipeline
+    from aiforge.trainer import TrainConfig
+
+    ws = Workspace(tmp_path)
+    ws.save_spec(from_template("MLP classifier (tabular)", "spiral"))
+    spec = ws.load_spec("spiral")
+    data = pipeline.load_data(ws, spec, {"source": "synthetic", "kind": "spirals"})
+    box = []
+    pipeline.train_model(ws, "spiral", data, TrainConfig(epochs=4, lr=0.005, max_samples=500, device="cpu"),
+                         on_log=lambda m: None, on_trainer=box.append,
+                         on_epoch=lambda r: box[0].stop() if r["epoch"] == 2 else None)
+
+    async def scenario():
+        app = AIForgeApp(tmp_path)
+        async with app.run_test(size=(140, 45)) as pilot:
+            await app.push_screen(TrainScreen("spiral", finetune=False))
+            screen = app.screen
+            await pilot.pause()
+            button = screen.query_one("#resume-run")
+            assert button.display and "2/4" in str(button.label)
+            screen.query_one("#device").value = "cpu"
+            button.press()
+            for _ in range(400):
+                await pilot.pause(0.05)
+                if pipeline.interrupted_run(ws, "spiral") is None and not screen.trainer:
+                    break
+            assert screen.query_one("#max_samples").value == "500"  # the run's own settings
+            assert len(screen.loss_hist) == 4  # earlier epochs redrawn, then the rest
+            assert not button.display
+
+            # A model without an unfinished run shows no Resume button.
+            ws.save_spec(from_template("MLP classifier (tabular)", "other"))
+            await app.push_screen(TrainScreen("other", finetune=False))
+            await pilot.pause()
+            assert not app.screen.query_one("#resume-run").display
+
+    asyncio.run(scenario())
+    hist = ws.load_history("spiral")
+    assert len(hist) == 1 and hist[0]["resumed_at"] == 2 and len(hist[0]["epochs"]) == 4
