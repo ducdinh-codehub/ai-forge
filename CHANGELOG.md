@@ -5,6 +5,8 @@ and versions follow [Semantic Versioning](https://semver.org/) (still `0.x`: any
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-02
+
 ### Added
 - **Pause and resume training.** A stopped, crashed or closed run continues where it left off:
   **⏯ Resume** on the Train screen, `aiforge train <model> --resume` on the command line.
@@ -32,6 +34,8 @@ and versions follow [Semantic Versioning](https://semver.org/) (still `0.x`: any
 - Importing a `.pt` file can no longer run code hidden in it: only supported layers are read.
 - The Train screen now remembers *Max samples* with the run settings.
 - Image datasets can be loaded by worker processes on macOS and Windows.
+- Windows: exported training scripts work when the data path contains `\U` or `\n` (e.g. `C:\Users\...`).
+- Windows: saving a training checkpoint no longer fails if the old one is being read at that moment.
 
 ## [0.1.9] - 2026-10-29
 
@@ -98,7 +102,8 @@ and versions follow [Semantic Versioning](https://semver.org/) (still `0.x`: any
 - First release: design a network from a list of layers, train it, use it and export it, all
   in the terminal. Built-in Guide and resizable panels.
 
-[Unreleased]: https://github.com/ducdinh-codehub/ai-forge/compare/v0.1.9...HEAD
+[Unreleased]: https://github.com/ducdinh-codehub/ai-forge/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/ducdinh-codehub/ai-forge/compare/v0.1.9...v0.2.0
 [0.1.9]: https://github.com/ducdinh-codehub/ai-forge/compare/v0.1.8...v0.1.9
 [0.1.8]: https://github.com/ducdinh-codehub/ai-forge/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/ducdinh-codehub/ai-forge/releases/tag/v0.1.7
