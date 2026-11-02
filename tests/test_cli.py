@@ -4,8 +4,10 @@ import json
 
 import pytest
 
-from aiforge import EXAMPLES_DIR
+from aiforge import EXAMPLES_DIR, pipeline
 from aiforge.cli import main
+from aiforge.spec import LayerSpec, Workspace
+from aiforge.trainer import TrainConfig
 
 
 @pytest.fixture
@@ -47,6 +49,54 @@ def test_retrain_reuses_data_and_resumes(spiral, capsys):
     assert spiral("train", "spiral", "-e", 1, "--resume", "--device", "cpu") == 0
     assert "loaded trained weights" in capsys.readouterr().out
     assert len(history(spiral.ws, "spiral")) == 2
+
+
+
+def _interrupt(aiforge, name, data, after, epochs=6):
+    """Train like the CLI does, but stop after `after` epochs (as Ctrl+C would)."""
+    ws = Workspace(aiforge.ws)
+    spec = ws.load_spec(name)
+    loaded = pipeline.load_data(ws, spec, pipeline.data_cfg_from_arg(data, spec))
+    box = []
+    pipeline.train_model(ws, name, loaded, TrainConfig(epochs=epochs, lr=0.005, scheduler="cosine", device="cpu"),
+                         on_log=lambda m: None, on_trainer=box.append,
+                         on_epoch=lambda r: box[0].stop() if r["epoch"] == after else None)
+    return ws
+
+
+def test_resume_continues_an_interrupted_run(aiforge, capsys):
+    assert aiforge("new", "spiral", "-t", "mlp classifier") == 0
+    ws = _interrupt(aiforge, "spiral", "spirals", after=2)
+    assert pipeline.interrupted_run(ws, "spiral")["epoch"] == 2
+    assert len(history(aiforge.ws, "spiral")[-1]["epochs"]) == 2  # the best so far is saved
+
+    capsys.readouterr()
+    # Its own data and settings: -e is ignored, the cosine schedule carries on over 6 epochs.
+    assert aiforge("train", "spiral", "--resume", "-e", 99, "--device", "cpu") == 0
+    assert "after epoch 2/6" in capsys.readouterr().out
+    hist = history(aiforge.ws, "spiral")
+    assert len(hist) == 1  # one run, not two
+    assert [e["epoch"] for e in hist[0]["epochs"]] == [1, 2, 3, 4, 5, 6] and hist[0]["resumed_at"] == 2
+    assert pipeline.interrupted_run(ws, "spiral") is None
+
+
+def test_unfinished_run_rules(aiforge, capsys):
+    assert aiforge("new", "spiral", "-t", "mlp classifier") == 0
+    ws = _interrupt(aiforge, "spiral", "spirals", after=1)
+    assert aiforge("train", "spiral", "--resume", "-d", "moons") == 1  # its own data only
+    ws.duplicate("spiral", "copy")
+    assert pipeline.interrupted_run(ws, "copy") is None  # the unfinished run stays with the original
+
+    spec = ws.load_spec("spiral")  # editing the structure makes the old run impossible to continue
+    spec.layers.insert(0, LayerSpec.new("Dropout"))
+    ws.save_spec(spec)
+    capsys.readouterr()
+    assert aiforge("train", "spiral", "--resume") == 1
+    assert "was edited" in capsys.readouterr().err
+
+    assert aiforge("train", "spiral", "-e", 1, "--device", "cpu") == 0  # a new run replaces it
+    assert "starting over" in capsys.readouterr().out
+    assert pipeline.interrupted_run(ws, "spiral") is None
 
 
 def test_fine_tune_saves_a_copy(spiral):

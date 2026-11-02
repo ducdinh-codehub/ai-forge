@@ -3,7 +3,8 @@ import pytest
 import torch
 
 from aiforge import data as datamod
-from aiforge.trainer import TrainConfig, Trainer, data_mismatch, fit_spec_to_data, reset_head
+from aiforge.trainer import (TrainConfig, Trainer, data_mismatch, fit_spec_to_data, load_checkpoint,
+                             reset_head)
 from conftest import make_spec
 
 
@@ -107,3 +108,73 @@ def test_reset_head():
     before = model[-1].weight.clone()
     assert reset_head(spec, model)
     assert not torch.equal(model[-1].weight, before)
+
+
+# -- checkpoints: an interrupted run continues where it stopped ----------------------------------
+
+
+def _moons(tmp_path):
+    return _setup(tmp_path, "MLP classifier (tabular)", {"source": "synthetic", "kind": "moons", "samples": 300})
+
+
+def _run_with_checkpoint(spec, tr, va, ck_path, stop_after=None, resume=None, **cfg):
+    cfg = TrainConfig(**{"device": "cpu", "epochs": 6, "lr": 0.01, "scheduler": "cosine", **cfg})
+    model = spec.build()
+    trainer = Trainer(spec, model, tr, va, cfg, on_log=lambda m: None, checkpoint=ck_path,
+                      checkpoint_meta={"note": "hi"},
+                      on_epoch=lambda r: trainer.stop() if r["epoch"] == stop_after else None)
+    return trainer.run(resume=resume), model
+
+
+def test_resumed_run_matches_an_uninterrupted_one(tmp_path):
+    spec, tr, va, _ = _moons(tmp_path)
+    torch.manual_seed(0)
+    full, full_model = _run_with_checkpoint(spec, tr, va, tmp_path / "a.pt")
+    assert not (tmp_path / "a.pt").exists()  # finished: nothing to resume
+
+    torch.manual_seed(0)
+    part, _ = _run_with_checkpoint(spec, tr, va, tmp_path / "b.pt", stop_after=3)
+    assert part["stopped"] and len(part["epochs"]) == 3
+    ck = load_checkpoint(tmp_path / "b.pt")
+    assert ck["epoch"] == 3 and ck["meta"] == {"note": "hi"}
+
+    torch.manual_seed(123)  # the checkpoint restores the random state itself
+    rest, model = _run_with_checkpoint(spec, tr, va, tmp_path / "b.pt", resume=ck)
+    assert rest["resumed_at"] == 3 and rest["started"] == part["started"]
+    assert [e["epoch"] for e in rest["epochs"]] == [1, 2, 3, 4, 5, 6]
+    assert [e["lr"] for e in rest["epochs"]] == pytest.approx([e["lr"] for e in full["epochs"]])
+    assert rest["best_score"] == pytest.approx(full["best_score"])
+    for a, b in zip(model.state_dict().values(), full_model.state_dict().values()):
+        assert torch.allclose(a, b)
+    assert not (tmp_path / "b.pt").exists()
+
+
+def test_half_done_epoch_is_not_checkpointed(tmp_path):
+    spec, tr, va, _ = _moons(tmp_path)
+    ck_path = tmp_path / "ck.pt"
+    model = spec.build()
+    cfg = TrainConfig(device="cpu", epochs=5, batch_size=16)
+    trainer = Trainer(spec, model, tr, va, cfg, on_log=lambda m: None, checkpoint=ck_path,
+                      on_epoch=lambda r: None,
+                      on_batch=lambda e, s, n, l: trainer.stop() if (e, s) >= (2, n // 2) else None)
+    trainer.run()
+    assert load_checkpoint(ck_path)["epoch"] == 1  # epoch 2 was cut short: it is redone in full
+
+
+def test_early_stop_leaves_no_checkpoint(tmp_path):
+    spec, tr, va, _ = _moons(tmp_path)
+    ck_path = tmp_path / "ck.pt"
+    run, _ = _run_with_checkpoint(spec, tr, va, ck_path, lr=1e-12, early_stop=2)
+    assert len(run["epochs"]) == 3 and not ck_path.exists()
+
+
+def test_damaged_checkpoint_is_ignored(tmp_path):
+    (tmp_path / "ck.pt").write_bytes(b"not a checkpoint")
+    assert load_checkpoint(tmp_path / "ck.pt") is None
+    assert load_checkpoint(tmp_path / "missing.pt") is None
+
+
+def test_stop_after_the_last_epoch_leaves_nothing_to_resume(tmp_path):
+    spec, tr, va, _ = _moons(tmp_path)
+    run, _ = _run_with_checkpoint(spec, tr, va, tmp_path / "ck.pt", stop_after=6)
+    assert run["stopped"] and len(run["epochs"]) == 6 and not (tmp_path / "ck.pt").exists()

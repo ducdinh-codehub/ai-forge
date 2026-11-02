@@ -13,7 +13,8 @@ from textual.widgets import (Button, Footer, Header, Input, Label, Markdown, Opt
 from textual.widgets.option_list import Option
 
 from .. import data as datamod
-from ..spec import safe_name
+from ..pipeline import checkpoint_path, interrupted_run, resume_problem, stored_data_cfg
+from ..spec import ModelSpec, safe_name
 from ..textgen import TOKENIZERS
 from .chart import LineChart
 from .resize import DEFAULT_FRACTION, MAX_FRACTION, MIN_FRACTION, ResizeHandle
@@ -150,6 +151,8 @@ class TrainScreen(Screen):
                     yield Static("", id="mismatch")
                 with Horizontal(classes="toolbar"):
                     yield Button("▶ Start", id="start", variant="success")
+                    yield Button("⏯ Resume", id="resume-run", variant="primary",
+                                 tooltip="Continue the unfinished run where it stopped")
                     yield Button("■ Stop", id="stop", variant="error", disabled=True)
                     yield Button("📖 Guide", id="guide-btn")
                     yield Static("", id="epoch-label")
@@ -191,6 +194,8 @@ class TrainScreen(Screen):
         if self.finetune:
             self.query_one("#save_as", Input).value = self.ws.unique_name(self.model_name + "-ft")
             self._fill_freeze_list()
+        self._resuming: dict | None = None
+        self._show_resume()
         self.query_one("#log", RichLog).write(
             "[dim]Tip: start with the defaults. If validation loss rises while train loss falls, the "
             "model is overfitting - add Dropout, lower epochs or use early stopping.[/]")
@@ -213,8 +218,8 @@ class TrainScreen(Screen):
     def _device_changed(self, event: Select.Changed) -> None:
         self.query_one("#sysmon", SystemPanel).set_device_choice(str(event.value))
 
-    def _apply_previous_dataset(self) -> None:
-        prev = self.spec.data.get("dataset_cfg")
+    def _apply_previous_dataset(self, prev: dict | None = None) -> None:
+        prev = prev or self.spec.data.get("dataset_cfg")
         if not prev and self.spec.task == "language_model":
             # A new language model starts on the bundled sample text, ready to train.
             prev = {"source": "text_corpus", "path": str(datamod.EXAMPLE_CORPUS),
@@ -368,6 +373,7 @@ class TrainScreen(Screen):
         self.app.call_from_thread(self._data_loaded, cfg, tr, va, info)
 
     def _data_failed(self, msg: str) -> None:
+        self._resuming = None
         self.query_one("#load", Button).disabled = False
         self.query_one("#data-info", Static).update(f"[red]Couldn't load data: {msg}[/]")
 
@@ -396,6 +402,8 @@ class TrainScreen(Screen):
                 "(1 MB) from 🗄 Get a famous dataset: a few epochs already write recognisable words.")
         if self.finetune and self.spec.class_names and info.class_names != self.spec.class_names:
             self.query_one("#reset_head", Switch).value = True
+        if self._resuming:
+            self._start_resumed()
 
     def _check_mismatch(self) -> None:
         probs = data_mismatch(self.spec, self.info) if self.info else []
@@ -510,13 +518,67 @@ class TrainScreen(Screen):
 
     # -- training ------------------------------------------------------------
 
+    # -- unfinished runs ---------------------------------------------------------
+
+    def _unfinished(self) -> dict | None:
+        """The model's interrupted run, if it was started in this mode (train vs fine-tune)."""
+        ck = interrupted_run(self.ws, self.model_name)
+        return ck if ck and bool(ck["meta"]["save_as"]) == self.finetune else None
+
+    def _show_resume(self) -> None:
+        ck = self._unfinished()
+        button = self.query_one("#resume-run", Button)
+        button.display = ck is not None
+        if ck:
+            done, total = ck["epoch"], ck["config"]["epochs"]
+            button.label = f"⏯ Resume {done}/{total}"
+            self.query_one("#log", RichLog).write(
+                f"[yellow]⏸ An unfinished run stopped after epoch {done} of {total}.[/] Press "
+                "[b]⏯ Resume[/b] to continue it with the same data and settings, or [b]▶ Start[/b] "
+                "for a new run (it replaces the unfinished one).")
+
+    @on(Button.Pressed, "#resume-run")
+    def _resume_pressed(self) -> None:
+        ck = self._unfinished()
+        if self.trainer or not ck:
+            return
+        if problem := resume_problem(self.ws, self.model_name, ck):
+            self.notify(problem, severity="error", timeout=8)
+            return
+        # Show the run's own settings, then load its data; training starts once it is loaded.
+        c = ck["config"]
+        for key in ("epochs", "batch_size", "lr", "weight_decay", "early_stop", "max_samples"):
+            self.query_one(f"#{key}", Input).value = str(c[key])
+        self.query_one("#optimizer", Select).value = c["optimizer"]
+        self.query_one("#scheduler", Select).value = c["scheduler"]
+        self.spec = ModelSpec.from_dict(ck["meta"]["spec"])
+        self.spec.name = self.model_name
+        data_cfg = ck["meta"]["data_cfg"]
+        self._apply_previous_dataset(data_cfg)
+        self._resuming = ck
+        self.query_one("#data-info", Static).update("[yellow]Loading the run's data…[/]")
+        self.query_one("#load", Button).disabled = True
+        self._load_data(data_cfg)
+
+    def _start_resumed(self) -> None:
+        ck, self._resuming = self._resuming, None
+        if probs := data_mismatch(self.spec, self.info):
+            self.notify(f"The data doesn't match the unfinished run: {probs[0]}", severity="error", timeout=8)
+            return
+        cfg = TrainConfig(**{**ck["config"], "device": self.query_one("#device", Select).value})
+        model = self.spec.build()
+        self.spec.apply_freeze(model)
+        save_as = ck["meta"]["save_as"] or self.model_name
+        self._launch(save_as, model, cfg, f"continuing after epoch {ck['epoch']}/{cfg.epochs}",
+                     ck["meta"], ck)
+
     def _train_cfg(self) -> TrainConfig:
         q = lambda i: self.query_one(f"#{i}", Input).value.strip()  # noqa: E731
         s = lambda i: self.query_one(f"#{i}", Select).value  # noqa: E731
         cfg = TrainConfig(epochs=int(q("epochs")), batch_size=int(q("batch_size")), lr=float(q("lr")),
                           optimizer=s("optimizer"), weight_decay=float(q("weight_decay") or 0),
                           scheduler=s("scheduler"), early_stop=int(q("early_stop") or 0),
-                          device=s("device"))
+                          device=s("device"), max_samples=int(q("max_samples") or 0))
         if cfg.epochs < 1 or cfg.batch_size < 1 or cfg.lr <= 0:
             raise ValueError
         return cfg
@@ -563,7 +625,14 @@ class TrainScreen(Screen):
             reset_head(self.spec, model)
             note += ", output layer re-initialised"
         self.spec.apply_freeze(model)
+        checkpoint_path(self.ws, self.model_name).unlink(missing_ok=True)  # replaces an unfinished run
+        meta = {"spec": self.spec.to_dict(), "save_as": save_as if self.finetune else None,
+                "data_cfg": stored_data_cfg(self.data_cfg)}
+        self._launch(save_as, model, cfg, note, meta)
 
+    def _launch(self, save_as: str, model, cfg: TrainConfig, note: str, meta: dict,
+                resume: dict | None = None) -> None:
+        self.query_one("#resume-run", Button).display = False
         log = self.query_one("#log", RichLog)
         log.write(f"[b]── {'Fine-tuning' if self.finetune else 'Training'} → '{save_as}' "
                   f"({note})[/b]")
@@ -576,7 +645,8 @@ class TrainScreen(Screen):
         chart.set_data([], [])
         self.query_one("#start", Button).disabled = True
         self.query_one("#stop", Button).disabled = False
-        self.query_one("#progress", ProgressBar).update(total=cfg.epochs, progress=0)
+        self.query_one("#progress", ProgressBar).update(total=cfg.epochs,
+                                                        progress=resume["epoch"] if resume else 0)
         self._batch_size, self._device = cfg.batch_size, pick_device(cfg.device).type
         call = self.app.call_from_thread
         self.trainer = Trainer(
@@ -584,8 +654,11 @@ class TrainScreen(Screen):
             on_log=lambda m: call(log.write, m),
             on_batch=lambda e, s, n, l: call(self._on_batch, e, s, n, l, cfg.epochs),
             on_epoch=lambda r: call(self._on_epoch, r),
-            target_std=self.info.preprocess.get("target_std", 1.0), preprocess=self.info.preprocess)
-        self._run(save_as, model)
+            target_std=self.info.preprocess.get("target_std", 1.0), preprocess=self.info.preprocess,
+            checkpoint=checkpoint_path(self.ws, self.model_name), checkpoint_meta=meta)
+        for r in (resume or {}).get("epochs", []):  # redraw the charts of the epochs already done
+            self._on_epoch(r)
+        self._run(save_as, model, resume)
 
     def _on_batch(self, epoch, step, steps, loss, epochs) -> None:
         self.query_one("#sysmon", SystemPanel).training_progress(
@@ -627,9 +700,9 @@ class TrainScreen(Screen):
             log.write(f"[dim]  ✎ sample:[/] [italic]{escape(r['sample'].strip())}[/]")
 
     @work(thread=True, exclusive=True, group="train")
-    def _run(self, save_as: str, model) -> None:
+    def _run(self, save_as: str, model, resume: dict | None = None) -> None:
         try:
-            run = self.trainer.run()
+            run = self.trainer.run(resume=resume)
         except Exception as e:  # noqa: BLE001
             self.app.call_from_thread(self._finished, None, save_as, model, str(e))
             return
@@ -637,6 +710,7 @@ class TrainScreen(Screen):
 
     def _finished(self, run, save_as, model, error) -> None:
         self.trainer = None
+        self.query_one("#resume-run", Button).display = self._unfinished() is not None
         self.query_one("#sysmon", SystemPanel).training_stopped()
         self.query_one("#start", Button).disabled = False
         self.query_one("#stop", Button).disabled = True
@@ -672,8 +746,8 @@ class TrainScreen(Screen):
         msg = f"Saved '{save_as}' (best weights, {len(run['epochs'])} epochs{metric})"
         log.write(f"[green]✓ {msg}[/]")
         self.notify(msg)
-        if self.finetune and save_as != self.model_name:
-            # Further runs on this screen continue from the new model.
+        if self.finetune and save_as != self.model_name and not self.query_one("#resume-run").display:
+            # Further runs on this screen continue from the new model (unless this one can be resumed).
             self.model_name = save_as
             self.query_one("#save_as", Input).value = self.ws.unique_name(save_as)
 

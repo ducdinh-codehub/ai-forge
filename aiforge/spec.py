@@ -293,6 +293,8 @@ class Workspace:
 
     def append_history(self, name: str, run: dict) -> None:
         hist = self.load_history(name)
+        if run.get("resumed_at") is not None:  # a resumed run replaces the record of its first part
+            hist = [h for h in hist if h.get("started") != run["started"]]
         hist.append(run)
         (self.model_dir(name) / "history.json").write_text(json.dumps(hist, indent=2))
 
@@ -300,7 +302,9 @@ class Workspace:
         shutil.rmtree(self.model_dir(name), ignore_errors=True)
 
     def duplicate(self, src: str, dst: str) -> None:
-        shutil.copytree(self.model_dir(src), self.model_dir(dst))
+        # An unfinished run belongs to the original only.
+        shutil.copytree(self.model_dir(src), self.model_dir(dst),
+                        ignore=shutil.ignore_patterns("checkpoint.pt*"))
         spec = self.load_spec(dst)
         spec.name = dst
         self.save_spec(spec)

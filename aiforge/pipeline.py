@@ -13,7 +13,8 @@ from torch import nn
 from . import data as datamod
 from .data import DataInfo
 from .spec import ModelSpec, Workspace, safe_name
-from .trainer import Trainer, TrainConfig, data_mismatch, fit_spec_to_data, reset_head
+from .trainer import (CHECKPOINT, Trainer, TrainConfig, data_mismatch, fit_spec_to_data, load_checkpoint,
+                      reset_head)
 
 TEXT_SUFFIXES = datamod.TEXT_EXT
 
@@ -84,6 +85,33 @@ def prepare(spec: ModelSpec, info: DataInfo, auto_fit: bool = True) -> list[str]
     return changes
 
 
+def checkpoint_path(ws: Workspace, name: str) -> Path:
+    return ws.model_dir(name) / CHECKPOINT
+
+
+def interrupted_run(ws: Workspace, name: str) -> dict | None:
+    """The checkpoint of ``name``'s last unfinished run (stopped, crashed or closed), if any."""
+    return load_checkpoint(checkpoint_path(ws, name))
+
+
+def resume_problem(ws: Workspace, name: str, ck: dict) -> str | None:
+    """Why the interrupted run can't continue (the model was edited since), or None."""
+    then = ModelSpec.from_dict(ck["meta"]["spec"]).layers
+    now = ws.load_spec(name).layers
+    if [(l.id, l.type) for l in then] != [(l.id, l.type) for l in now]:
+        return (f"'{name}' was edited after its last run was interrupted, so that run can't "
+                "continue. Start a new run instead.")
+    return None
+
+
+def stored_data_cfg(cfg: dict) -> dict:
+    """The data config as remembered in the spec: no empty values, absolute paths."""
+    stored = {k: v for k, v in cfg.items() if v not in (None, "")}
+    if stored.get("path"):
+        stored["path"] = str(Path(stored["path"]).expanduser())
+    return stored
+
+
 def train_model(ws: Workspace, name: str, data: LoadedData, cfg: TrainConfig, *,
                 save_as: str | None = None, resume: bool = False, auto_fit: bool = True,
                 on_log: Callable[[str], None] = print,
@@ -92,10 +120,15 @@ def train_model(ws: Workspace, name: str, data: LoadedData, cfg: TrainConfig, *,
                 on_trainer: Callable[[Trainer], None] | None = None) -> tuple[dict, ModelSpec]:
     """Train ``name`` on ``data`` and save it (as ``save_as`` if given: a fine-tuned copy).
 
-    ``resume`` continues from the saved weights instead of random ones; saving under a new name
-    always starts from them. Returns the run record (also appended to the history) and the spec.
-    Nothing is saved when no epoch finished."""
+    ``resume`` continues the last interrupted run where it stopped (same data and settings, see
+    ``interrupted_run``), or else starts from the saved weights instead of random ones; saving
+    under a new name always starts from them. Returns the run record (also appended to the
+    history) and the spec. Nothing is saved when no epoch finished."""
     check_config(cfg)
+    ck = interrupted_run(ws, name) if resume else None
+    if ck:
+        return _resume(ws, name, data, cfg, ck, on_log, on_batch, on_epoch, on_trainer)
+    checkpoint_path(ws, name).unlink(missing_ok=True)  # a new run replaces an unfinished one
     save_as = safe_name(save_as) if save_as else name
     if not save_as:
         raise ValueError("Pick a name with letters or digits for --save-as")
@@ -121,21 +154,46 @@ def train_model(ws: Workspace, name: str, data: LoadedData, cfg: TrainConfig, *,
     spec.apply_freeze(model)
     on_log(f"{'Fine-tuning' if finetune else 'Training'} '{name}'"
            f"{f' → {save_as!r}' if finetune else ''} ({note})")
+    meta = {"spec": spec.to_dict(), "save_as": save_as if finetune else None,
+            "data_cfg": stored_data_cfg(data.cfg)}
+    return _train_and_save(ws, name, save_as, spec, model, data, cfg, meta, None,
+                           on_log, on_batch, on_epoch, on_trainer)
 
+
+def _resume(ws, name, data, cfg, ck, on_log, on_batch, on_epoch, on_trainer):
+    if problem := resume_problem(ws, name, ck):
+        raise ValueError(problem)
+    meta = ck["meta"]
+    spec = ModelSpec.from_dict(meta["spec"])
+    spec.name = name  # the model may have been renamed since
+    if probs := data_mismatch(spec, data.info):
+        raise ValueError(f"The data doesn't match the interrupted run: {probs[0]}")
+    # The original settings, so the learning-rate schedule and epoch count carry on unchanged.
+    cfg = TrainConfig(**{**ck["config"], "device": cfg.device})
+    model = spec.build()
+    spec.apply_freeze(model)
+    save_as = meta["save_as"] or name
+    on_log(f"Continuing the interrupted run of '{name}'"
+           f"{f' → {save_as!r}' if save_as != name else ''} ({cfg.epochs} epochs, lr {cfg.lr:g})")
+    return _train_and_save(ws, name, save_as, spec, model, data, cfg, meta, ck,
+                           on_log, on_batch, on_epoch, on_trainer)
+
+
+def _train_and_save(ws, name, save_as, spec, model, data, cfg, meta, ck,
+                    on_log, on_batch, on_epoch, on_trainer):
     trainer = Trainer(spec, model, data.train, data.val, cfg, on_log=on_log, on_batch=on_batch,
                       on_epoch=on_epoch, target_std=data.info.preprocess.get("target_std", 1.0),
-                      preprocess=data.info.preprocess)
+                      preprocess=data.info.preprocess, checkpoint=checkpoint_path(ws, name),
+                      checkpoint_meta=meta)
     if on_trainer:
         on_trainer(trainer)
-    run = trainer.run()
+    run = trainer.run(resume=ck)
     if not run["epochs"]:
         return run, spec
 
+    finetune = save_as != name
     spec.data["preprocess"] = data.info.preprocess
-    stored = {k: v for k, v in data.cfg.items() if v not in (None, "")}
-    if stored.get("path"):
-        stored["path"] = str(Path(stored["path"]).expanduser())
-    spec.data["dataset_cfg"] = stored
+    spec.data["dataset_cfg"] = meta["data_cfg"]
     run["kind"] = "fine-tune" if finetune else "train"
     run["dataset"] = data.info.description
     run["source"] = "cli"

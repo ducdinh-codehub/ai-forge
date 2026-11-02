@@ -8,7 +8,7 @@ A prioritised plan for making AIForge sturdier and more useful. Tick items off a
   `torch.load(weights_only=False)`, so a malicious file could run code on import. Load with
   `weights_only=True` and allow-list only the `nn` layer classes the builder can convert; anything
   else is refused with a clear message.
-- [ ] **Tests for the core modules.** `spec.py`, `trainer.py`, `data.py`, `evaluate.py`, `layers.py`
+- [x] **Tests for the core modules.** `spec.py`, `trainer.py`, `data.py`, `evaluate.py`, `layers.py`
   and `model_io.py` have no direct tests. Add:
   - every template builds, runs a forward pass, and exports to ONNX + TorchScript with the right shapes
   - spec → generated `.py` → re-import round trip
@@ -17,7 +17,7 @@ A prioritised plan for making AIForge sturdier and more useful. Tick items off a
 
 ## 2. Training
 
-- [ ] **Resume / pause.** Checkpoint model + optimizer + scheduler + epoch every epoch; offer
+- [x] **Resume / pause.** Checkpoint model + optimizer + scheduler + epoch every epoch; offer
   "Resume" when a run was interrupted.
 - [ ] **Speed.** "Auto" mixed precision (`torch.autocast`) on CUDA/MPS; `num_workers > 0` for image
   folders (currently hard-coded to 0 in `trainer.py`).
