@@ -17,7 +17,7 @@
 
 **Build, train and use your own AI models in the terminal, without writing any code.**
 
-![AIForge model library](https://raw.githubusercontent.com/ducdinh-codehub/ai-forge/main/docs/images/10-home.png)
+![AIForge demo: create, train and use a model in under a minute](https://raw.githubusercontent.com/ducdinh-codehub/ai-forge/main/docs/images/demo.gif)
 
 With the mouse or keyboard you can:
 
@@ -49,7 +49,8 @@ No PyTorch or Python knowledge needed. The built-in **Guide** (`g`) teaches the 
 
 ## 1. Install
 
-**You need:** Python 3.10+, about 2 GB of disk space (mostly PyTorch), and a terminal window
+**You need:** Python 3.10+, disk space for PyTorch (about 1 GB on macOS and Windows; several GB
+on Linux, or about 1 GB with the [CPU-only build](#cpu-only-install-linux-without-an-nvidia-gpu)), and a terminal window
 of at least **120 × 35**. A GPU is optional: NVIDIA (CUDA) and Apple Silicon (MPS) are used
 automatically.
 
@@ -57,6 +58,19 @@ automatically.
 pipx install aiforge-studio      # recommended (or: pip install aiforge-studio)
 aiforge                          # start the app
 ```
+
+#### CPU-only install (Linux without an NVIDIA GPU)
+
+On Linux, PyTorch comes with NVIDIA's GPU libraries by default: a download of **over 2 GB**.
+Without an NVIDIA GPU you don't need them. The CPU-only build is **about 200 MB**:
+
+```bash
+pipx install aiforge-studio --pip-args="--extra-index-url https://download.pytorch.org/whl/cpu"
+# or, in a virtual environment:
+pip install aiforge-studio --extra-index-url https://download.pytorch.org/whl/cpu
+```
+
+macOS and Windows already get the small build (Apple GPUs work with it), so this isn't needed there.
 
 <details>
 <summary>No pipx yet? / NVIDIA GPU stats / install from source</summary>
@@ -525,11 +539,13 @@ aiforge/
 ├── sysinfo.py    hardware specs and live usage
 └── tui/          the Textual interface (one module per screen)
 docs/make_screenshots.py   regenerates the README screenshots
+docs/make_demo_gif.py      regenerates the demo animation at the top of this README
 ```
 
 **Tests:** `pip install -e ".[dev]" && pytest`
 
-**Release:** bump `__version__` in `aiforge/__init__.py`, merge to `main`, then push a matching tag
+**Release:** move the *Unreleased* notes in [CHANGELOG.md](CHANGELOG.md) under the new version, bump
+`__version__` in `aiforge/__init__.py`, merge to `main`, then push a matching tag
 (`git tag v0.1.9 && git push origin v0.1.9`). GitHub Actions builds it and publishes it to PyPI.
 Every pull request runs the tests on Linux, macOS and Windows first.
 

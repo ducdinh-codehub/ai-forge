@@ -38,6 +38,6 @@ A prioritised plan for making AIForge sturdier and more useful. Tick items off a
 
 ## 4. Docs & distribution
 
-- [ ] Short GIF / asciinema demo at the top of the README.
-- [ ] `CHANGELOG.md`.
-- [ ] Document the CPU-only PyTorch install to cut the ~2 GB download for users without a GPU.
+- [x] Short GIF / asciinema demo at the top of the README.
+- [x] `CHANGELOG.md`.
+- [x] Document the CPU-only PyTorch install to cut the ~2 GB download for users without a GPU.
