@@ -20,6 +20,8 @@ and versions follow [Semantic Versioning](https://semver.org/) (still `0.x`: any
 - **Explain a prediction.** 🔍 Explain on the Use screen and `aiforge explain`: which features or
   words pushed the model towards its answer or away from it, and a heat map of where an image
   model looks.
+- **Compare runs.** 📈 Compare (`m`) and `aiforge compare`: the curves of several runs or models on
+  one chart, with a table of best and last scores and only the settings that differ.
 - Tests for the core modules: every template builds, exports to ONNX and TorchScript, and round-trips.
 - `docs/improvement-guide.md`: the roadmap.
 - Docs: CPU-only install (a ~200 MB PyTorch instead of ~2 GB).

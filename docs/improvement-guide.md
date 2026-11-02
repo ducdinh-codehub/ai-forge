@@ -27,7 +27,7 @@ A prioritised plan for making AIForge sturdier and more useful. Tick items off a
 
 ## 3. Product
 
-- [ ] **Experiment comparison.** Overlay the curves of several runs or models on one chart.
+- [x] **Experiment comparison.** Overlay the curves of several runs or models on one chart.
 - [x] **More data sources.** Excel / Parquet; any Hugging Face dataset by name; image datasets given
   as a CSV of paths + labels.
 - [x] **Explain a prediction.** Feature importance (tables), saliency heatmap (images, as terminal

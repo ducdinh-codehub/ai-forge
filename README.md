@@ -201,6 +201,12 @@ separate file or folder with the true answers) and click **▶ Evaluate** (`Ctrl
 **💾 Save report** writes it to `exports/<model>/` as Markdown and JSON. The home screen shows
 the last result. New to the metrics? Press `g` → **7. Is my model good?**
 
+### Compare: which run was best?
+Press `m` (**📈 Compare**). Tick training runs, of one model over time or of different models on
+the same data, to see their curves on one chart and a table of the best and last scores. Only the
+settings that differ are shown, so you see what made the difference; the best run gets a ★.
+Command line: `aiforge compare small big --metric val_acc`.
+
 ### Export
 | Format | Use it to… |
 |---|---|
@@ -336,6 +342,7 @@ New to the words (epoch, loss, overfitting…)? Press `g` → **🎓 ML basics**
 | `f` | Fine-tune | `Ctrl+D` | Duplicate layer | | |
 | `p` | Use | `Ctrl+Z` | Undo | | |
 | `v` | Evaluate | | | | |
+| `m` | Compare runs | | | | |
 | `x` | Export | `Ctrl+S` | Save | | |
 | `a` | Serve (web API) | | | | |
 | `s` | Datasets | `Ctrl+E` | Explain tab | | |
@@ -406,6 +413,7 @@ aiforge list
 | Force full precision / load images with 4 processes | `--precision fp32` · `--workers 4` |
 | Train on a Hugging Face dataset | `aiforge train reviews -d hf:imdb` (`hf:NAME:SUBSET`, `--split test`) |
 | Train on an Excel file / a table of image paths | `-d sales.xlsx` · `-d photos.csv` (image models; `--image-column file`) |
+| Compare runs (best one gets a ★) | `aiforge compare small big --metric val_acc` (`--last 3`) |
 | See why it gave an answer | `aiforge explain fruit "6.1, 2.7, green"` |
 | Pick the CSV column to predict | `--target price` (text classifiers: also `--text-column review`) |
 | Stop early | `Ctrl+C`: stops after the current batch and keeps the best epoch |

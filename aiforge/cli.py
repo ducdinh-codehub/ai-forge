@@ -87,6 +87,11 @@ def add_commands(parser: argparse.ArgumentParser, common: argparse.ArgumentParse
     p.add_argument("-o", "--out", help="Where --file writes its CSV (default: next to the input)")
     p.add_argument("-k", "--top-k", type=int, default=5, help="How many guesses to show")
 
+    p = sub.add_parser("compare", parents=[common], help="Compare training runs of one or more models")
+    p.add_argument("models", nargs="+", metavar="model")
+    p.add_argument("--metric", help="val_loss, val_acc, val_mae, val_ppl, train_loss... (default: the first all runs have)")
+    p.add_argument("--last", type=int, default=0, metavar="N", help="Only the last N runs of each model (0 = all)")
+
     p = sub.add_parser("explain", parents=[common], help="Show why a model gave its answer for one input")
     p.add_argument("model")
     p.add_argument("input", help="Comma-separated values, a sentence, or an image path (quote it)")
@@ -361,6 +366,42 @@ def cmd_predict(ws, args) -> None:
         style = "b" if i == 0 else "dim" if p < 0.05 else ""
         line = f"{label:<{width}}  {p:6.1%}  {'█' * round(p * 30)}"
         out.print(f"[{style}]{line}[/]" if style else line)
+
+
+SPARK = "▁▂▃▄▅▆▇█"
+
+
+def cmd_compare(ws, args) -> None:
+    from .compare import METRICS, collect_runs, common_metrics, table
+
+    for name in args.models:
+        _need_model(ws, name)
+    runs = []
+    for name in args.models:
+        mine = collect_runs(ws, [name])
+        runs += mine[-args.last:] if args.last > 0 else mine
+    if not runs:
+        raise CLIError("No training runs to compare yet - train the model(s) first")
+    metrics = common_metrics(runs)
+    metric = args.metric or (metrics[0] if metrics else None)
+    if metric not in metrics:
+        raise CLIError(f"Not every run has '{metric}'. These all do: {', '.join(metrics) or 'none'}")
+    header, rows, best = table(runs, metric)
+    t = Table(title=f"{METRICS[metric][0]} ({'lower' if METRICS[metric][2] == 'min' else 'higher'} is better)")
+    for h in header + ["Curve"]:
+        t.add_column(h, justify="right" if h in ("Epochs", "Best", "Last") else "left")
+    values = [v for r in runs for v in r.series(metric)]
+    lo, hi = min(values), max(values)
+    longest = max(len(r.series(metric)) for r in runs)
+    for i, (r, row) in enumerate(zip(runs, rows)):
+        s = r.series(metric)
+        width = max(1, round(24 * len(s) / longest))  # a shared epoch axis: shorter runs end earlier
+        pts = [s[min(len(s) - 1, k * len(s) // width)] for k in range(width)]
+        curve = "".join(SPARK[0 if hi == lo else round((v - lo) / (hi - lo) * 7)] for v in pts)
+        if i == best:
+            row[4] = f"[b green]★ {row[4]}[/]"
+        t.add_row(*row, f"[cyan]{curve}[/]")
+    out.print(t)
 
 
 def cmd_explain(ws, args) -> None:
