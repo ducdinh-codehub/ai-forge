@@ -19,7 +19,7 @@ from ..textgen import TOKENIZERS
 from .chart import LineChart
 from .resize import DEFAULT_FRACTION, MAX_FRACTION, MIN_FRACTION, ResizeHandle
 from .sysmon import SystemPanel
-from ..trainer import (TrainConfig, Trainer, available_devices, data_mismatch, fit_spec_to_data,
+from ..trainer import (PRECISIONS, TrainConfig, Trainer, available_devices, data_mismatch, fit_spec_to_data,
                        pick_device, reset_head)
 
 
@@ -124,6 +124,15 @@ class TrainScreen(Screen):
                         yield Label("Device")
                         yield Select([(d, d) for d in available_devices()], value="auto",
                                      allow_blank=False, id="device")
+                with Horizontal(classes="row"):
+                    with Vertical():
+                        yield Label("Precision")
+                        yield Select([(v, k) for k, v in PRECISIONS.items()], value="auto",
+                                     allow_blank=False, id="precision")
+                    with Vertical():
+                        yield Label("Data workers")
+                        yield Select([("auto", "-1")] + [(str(n), str(n)) for n in (0, 1, 2, 4, 8)],
+                                     value="-1", allow_blank=False, id="workers")
                 if not self.finetune:
                     with Horizontal(classes="switch-row"):
                         yield Switch(True, id="resume")
@@ -551,6 +560,7 @@ class TrainScreen(Screen):
             self.query_one(f"#{key}", Input).value = str(c[key])
         self.query_one("#optimizer", Select).value = c["optimizer"]
         self.query_one("#scheduler", Select).value = c["scheduler"]
+        self.query_one("#precision", Select).value = c.get("precision", "auto")
         self.spec = ModelSpec.from_dict(ck["meta"]["spec"])
         self.spec.name = self.model_name
         data_cfg = ck["meta"]["data_cfg"]
@@ -565,7 +575,8 @@ class TrainScreen(Screen):
         if probs := data_mismatch(self.spec, self.info):
             self.notify(f"The data doesn't match the unfinished run: {probs[0]}", severity="error", timeout=8)
             return
-        cfg = TrainConfig(**{**ck["config"], "device": self.query_one("#device", Select).value})
+        cfg = TrainConfig(**{**ck["config"], "device": self.query_one("#device", Select).value,
+                             "workers": int(self.query_one("#workers", Select).value)})
         model = self.spec.build()
         self.spec.apply_freeze(model)
         save_as = ck["meta"]["save_as"] or self.model_name
@@ -578,7 +589,8 @@ class TrainScreen(Screen):
         cfg = TrainConfig(epochs=int(q("epochs")), batch_size=int(q("batch_size")), lr=float(q("lr")),
                           optimizer=s("optimizer"), weight_decay=float(q("weight_decay") or 0),
                           scheduler=s("scheduler"), early_stop=int(q("early_stop") or 0),
-                          device=s("device"), max_samples=int(q("max_samples") or 0))
+                          device=s("device"), max_samples=int(q("max_samples") or 0),
+                          precision=s("precision"), workers=int(s("workers")))
         if cfg.epochs < 1 or cfg.batch_size < 1 or cfg.lr <= 0:
             raise ValueError
         return cfg
@@ -862,7 +874,8 @@ class TrainScreen(Screen):
     def _raw_settings(self) -> dict:
         vals = {i: self.query_one(f"#{i}", Input).value for i in
                 ("epochs", "batch_size", "lr", "weight_decay", "early_stop", "val_split")}
-        vals.update({i: str(self.query_one(f"#{i}", Select).value) for i in ("optimizer", "scheduler", "device")})
+        vals.update({i: str(self.query_one(f"#{i}", Select).value)
+                     for i in ("optimizer", "scheduler", "device", "precision", "workers")})
         return vals
 
     def _frozen_params(self) -> int:

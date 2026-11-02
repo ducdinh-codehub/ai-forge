@@ -720,6 +720,18 @@ def training_settings_markdown(spec: ModelSpec, values: dict, n_train: int | Non
            "Where the maths runs. `auto` picks the GPU if there is one - see the 💻 panel for what "
            "is actually being used.", ""]
 
+    precision, workers = values.get("precision"), values.get("workers")
+    md += [f"## Precision = {precision}" if precision else "## Precision",
+           "How many bits each number uses while training. **Mixed precision** does most maths in "
+           "16 bits: on an NVIDIA GPU that is often 2-3× faster and needs less memory, with the same "
+           "final quality. `auto` uses it on NVIDIA GPUs only (Apple GPUs and CPUs gain nothing). "
+           "Pick `full fp32` if the loss turns `nan`.", ""]
+    md += ["## Data workers = " + ("auto" if workers in (None, "-1") else str(workers)),
+           "Background processes that read and resize images while the model trains, so the GPU "
+           "never waits for data. Only image data benefits. `auto` uses up to 4 on Linux for 1,000+ "
+           "images. On macOS and Windows each worker needs a few seconds to start and stop, so "
+           "they only pay off on long runs over many images - try 2 if an epoch is slow.", ""]
+
     md += ["## What is being learned",
            f"The model has **{total:,} parameters**."]
     if finetune:

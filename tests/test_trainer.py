@@ -1,10 +1,12 @@
 """Training: models learn, the best epoch is kept, and the controls (early stop, freeze, stop) work."""
+import math
+
 import pytest
 import torch
 
 from aiforge import data as datamod
-from aiforge.trainer import (TrainConfig, Trainer, data_mismatch, fit_spec_to_data, load_checkpoint,
-                             reset_head)
+from aiforge.trainer import (TrainConfig, Trainer, amp_dtype, data_mismatch, fit_spec_to_data,
+                             load_checkpoint, reset_head)
 from conftest import make_spec
 
 
@@ -178,3 +180,50 @@ def test_stop_after_the_last_epoch_leaves_nothing_to_resume(tmp_path):
     spec, tr, va, _ = _moons(tmp_path)
     run, _ = _run_with_checkpoint(spec, tr, va, tmp_path / "ck.pt", stop_after=6)
     assert run["stopped"] and len(run["epochs"]) == 6 and not (tmp_path / "ck.pt").exists()
+
+
+# -- speed: mixed precision ------------------------------------------------------------------------
+
+MPS = torch.backends.mps.is_available()
+
+
+def test_amp_dtype(monkeypatch):
+    cpu, mps, cuda = torch.device("cpu"), torch.device("mps"), torch.device("cuda")
+    assert amp_dtype(cpu) is None and amp_dtype(mps) is None  # no measured gain there
+    assert amp_dtype(cuda, "fp32") is None
+    monkeypatch.setattr(torch.cuda, "is_bf16_supported", lambda *a, **k: True)
+    assert amp_dtype(cuda) == torch.bfloat16
+    monkeypatch.setattr(torch.cuda, "is_bf16_supported", lambda *a, **k: False)
+    assert amp_dtype(cuda) == torch.float16  # older cards: float16 with loss scaling
+    assert amp_dtype(cpu, "bf16") == torch.bfloat16 and amp_dtype(mps, "fp16") == torch.float16
+
+
+def test_bfloat16_training_learns(tmp_path):
+    spec, tr, va, _ = _setup(tmp_path, "MLP classifier (tabular)",
+                             {"source": "synthetic", "kind": "spirals", "samples": 900})
+    logs = []
+    torch.manual_seed(0)
+    trainer = Trainer(spec, spec.build(), tr, va, TrainConfig(epochs=15, lr=0.01, device="cpu", precision="bf16"),
+                      on_log=logs.append)
+    run = trainer.run()
+    assert any("mixed precision (bfloat16)" in m for m in logs)
+    assert max(e["val_acc"] for e in run["epochs"]) > 0.6
+    assert all(p.dtype == torch.float32 for p in trainer.model.parameters())  # weights stay full precision
+
+
+@pytest.mark.skipif(not MPS, reason="needs an Apple GPU")
+def test_float16_with_loss_scaling_on_mps_resumes(tmp_path):
+    spec, tr, va, info = _setup(tmp_path, "Tiny GPT (characters, fast)",
+                                {"source": "text_corpus", "path": datamod.EXAMPLE_CORPUS, "val_split": 0.1})
+    tr = datamod.limit(tr, 256)
+    cfg = TrainConfig(epochs=3, lr=0.003, batch_size=32, device="mps", precision="fp16")
+    ck_path = tmp_path / "ck.pt"
+    trainer = Trainer(spec, spec.build(), tr, va, cfg, on_log=lambda m: None, checkpoint=ck_path,
+                      preprocess=info.preprocess, on_epoch=lambda r: trainer.stop() if r["epoch"] == 1 else None)
+    trainer.run()
+    ck = load_checkpoint(ck_path)
+    assert ck["scaler"]["scale"] > 0  # the loss scale is saved for resuming
+    rest = Trainer(spec, spec.build(), tr, va, cfg, on_log=lambda m: None, checkpoint=ck_path,
+                   preprocess=info.preprocess).run(resume=ck)
+    losses = [e["train_loss"] for e in rest["epochs"]]
+    assert len(losses) == 3 and all(math.isfinite(l) for l in losses) and losses[-1] < losses[0]

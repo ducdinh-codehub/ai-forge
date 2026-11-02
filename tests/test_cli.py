@@ -99,6 +99,18 @@ def test_unfinished_run_rules(aiforge, capsys):
     assert pipeline.interrupted_run(ws, "spiral") is None
 
 
+
+def test_speed_settings_are_recorded(aiforge, capsys):
+    assert aiforge("new", "spiral", "-t", "mlp classifier") == 0
+    assert aiforge("train", "spiral", "-d", "spirals", "-e", 1, "--device", "cpu",
+                   "--precision", "bf16", "--workers", 0) == 0
+    assert "mixed precision (bfloat16)" in capsys.readouterr().out
+    config = history(aiforge.ws, "spiral")[-1]["config"]
+    assert config["precision"] == "bf16" and config["workers"] == 0
+    with pytest.raises(SystemExit):  # not a choice: argparse explains the valid ones
+        aiforge("train", "spiral", "--precision", "fp8")
+
+
 def test_fine_tune_saves_a_copy(spiral):
     assert spiral("train", "spiral", "-d", "moons", "-e", 1, "--save-as", "moons", "--device", "cpu") == 0
     run = history(spiral.ws, "moons")[-1]
