@@ -81,3 +81,16 @@ def test_script_for_huggingface_text_uses_datasets():
     text = training_script(spec, TrainConfig())
     assert "from datasets import load_dataset" in text and "the Hugging Face dataset 'imdb'" in text
     compile(text, "train.py", "exec")
+
+
+def test_windows_paths_dont_break_the_script():
+    from aiforge.scriptgen import training_script
+    from aiforge.trainer import TrainConfig
+    from conftest import make_spec
+
+    spec = make_spec("MLP classifier (tabular)")
+    spec.data["dataset_cfg"] = {"source": "csv", "path": r"C:\Users\new\table.csv"}  # \U and \n
+    text = training_script(spec, TrainConfig())
+    namespace = {}
+    exec(compile(text.replace('if __name__ == "__main__":', "if False:"), "train.py", "exec"), namespace)
+    assert r"C:\Users\new\table.csv" in namespace["__doc__"] and namespace["DATA"]["path"] == r"C:\Users\new\table.csv"
