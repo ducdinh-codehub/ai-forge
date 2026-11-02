@@ -17,6 +17,7 @@ EXPORT_FORMATS = {
     "weights_safetensors": ("Weights - safetensors (.safetensors)", "Safe, fast tensor format (HF ecosystem)"),
     "spec_json": ("Structure - JSON spec (.json)", "Layer list, shapes, classes, preprocessing"),
     "pytorch_py": ("Structure - PyTorch code (.py)", "Plain nn.Sequential source you can edit"),
+    "train_py": ("Training script (.py)", "Standalone PyTorch script that re-trains it: data, settings, loop"),
     "summary_txt": ("Structure - summary table (.txt)", "Layers, output shapes, parameter counts"),
     "torchscript": ("Full model - TorchScript (.pt)", "Runs with torch.jit.load(), no Python class needed"),
     "onnx": ("Full model - ONNX (.onnx)", "Deploy with ONNX Runtime, TensorRT, OpenVINO, ..."),
@@ -75,6 +76,12 @@ def export(ws: Workspace, name: str, fmt: str, out_dir: Path | None = None) -> P
     if fmt == "pytorch_py":
         path = base.with_name(base.name.replace("-", "_").replace(".", "_") + "_model.py")
         path.write_text(to_pytorch_source(spec))
+        return path
+    if fmt == "train_py":
+        from .scriptgen import _file_name, last_run_config, training_script
+
+        path = base.with_name(_file_name(base.name))
+        path.write_text(training_script(spec, last_run_config(ws.load_history(name))), encoding="utf-8")
         return path
     if fmt == "summary_txt":
         path = base.with_name(base.name + "_summary.txt")

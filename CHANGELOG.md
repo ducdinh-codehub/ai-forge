@@ -12,6 +12,8 @@ and versions follow [Semantic Versioning](https://semver.org/) (still `0.x`: any
   resumed run matches an uninterrupted one.
 - **Faster training.** Mixed precision on NVIDIA GPUs (`--precision`, *Precision* on the Train
   screen) and background image loading on Linux (`--workers`, *Data workers*).
+- **Training script export.** A standalone `train.py` that re-trains the model in plain PyTorch:
+  the data loading, the settings of its last run and the training loop. Export → *Training script*.
 - Tests for the core modules: every template builds, exports to ONNX and TorchScript, and round-trips.
 - `docs/improvement-guide.md`: the roadmap.
 - Docs: CPU-only install (a ~200 MB PyTorch instead of ~2 GB).

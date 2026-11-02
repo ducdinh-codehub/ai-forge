@@ -203,6 +203,7 @@ the last result. New to the metrics? Press `g` → **7. Is my model good?**
 | AIForge bundle `.zip` | Back up or share with another AIForge user |
 | Weights `.pt` / `.safetensors` | Load in your own PyTorch / Hugging Face code |
 | PyTorch code `.py` · JSON · summary | Read, edit or document the model |
+| Training script `.py` | Re-train it with plain PyTorch: its data loading, settings and training loop, ready to edit |
 | TorchScript · ONNX | Run in C++, mobile, ONNX Runtime, TensorRT, browsers… |
 
 ### Serve: use it from a web page or another program

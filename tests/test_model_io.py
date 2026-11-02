@@ -51,6 +51,8 @@ def test_onnx_gives_the_same_answers(ws, template):
 def test_every_format_writes_a_file(ws):
     _store(ws, "Small CNN (28×28 grayscale, e.g. MNIST)")
     for fmt in EXPORT_FORMATS:
+        if fmt == "train_py":  # needs a training run: see test_scriptgen.py
+            continue
         path = export(ws, "m", fmt, ws.root / "out")
         assert path.exists() and path.stat().st_size > 0, fmt
     with pytest.raises(ValueError):

@@ -32,7 +32,7 @@ A prioritised plan for making AIForge sturdier and more useful. Tick items off a
   as a CSV of paths + labels.
 - [ ] **Explain a prediction.** Feature importance (tables), saliency heatmap (images, as terminal
   block art), highlighted tokens (text).
-- [ ] **"Training script" export.** A standalone `train.py` reproducing the run: data loading,
+- [x] **"Training script" export.** A standalone `train.py` reproducing the run: data loading,
   config and loop. The path from no-code to real code.
 - [ ] **Guided first run.** Offer the spirals quick start on first launch with on-screen highlights.
 
