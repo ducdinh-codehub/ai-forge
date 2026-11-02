@@ -191,7 +191,8 @@ when you close the window. Step-by-step: [Web API](#11-web-api-use-your-model-fr
 
 ### Import
 Press `i`: AIForge bundles, `.json`, `.safetensors`, or a PyTorch `nn.Sequential` saved with
-`torch.save`. ⚠️ **Only import `.pt`/`.pth` files you trust**, as they can run code.
+`torch.save`. `.pt`/`.pth` files are loaded safely: only supported layers are read, and a file
+that tries to run code is refused.
 
 ### Guide
 Press `g`. Beginner lessons (ML basics, model types), a step-by-step walk-through of your

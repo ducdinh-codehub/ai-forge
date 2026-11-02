@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import pickle
 import zipfile
 from pathlib import Path
 
@@ -137,12 +138,12 @@ def import_path(ws: Workspace, path: str, name: str | None = None,
         return _store(ws, spec, name, p, None)
 
     if p.suffix in (".pt", ".pth", ".bin"):
-        obj = torch.load(p, map_location="cpu", weights_only=False)
+        if _is_torchscript(p):
+            raise ValueError("TorchScript models can't be edited. Export the original nn.Sequential instead.")
+        obj = _safe_load_module(p)
         if isinstance(obj, dict):
             raise ValueError("This file holds only weights (a state_dict). Open or create a model with "
                              "the same structure and use 'Load weights'.")
-        if isinstance(obj, torch.jit.ScriptModule):
-            raise ValueError("TorchScript models can't be edited. Export the original nn.Sequential instead.")
         if not isinstance(obj, nn.Module):
             raise ValueError(f"Unsupported object in file: {type(obj).__name__}")
         spec, model = sequential_to_spec(obj, name or p.stem, input_shape)
@@ -201,6 +202,31 @@ def load_weights_into(ws: Workspace, name: str, path: str) -> str:
 
 _SIMPLE = {nn.ReLU: "ReLU", nn.GELU: "GELU", nn.SiLU: "SiLU", nn.Tanh: "Tanh",
            nn.Sigmoid: "Sigmoid", nn.Flatten: "Flatten"}
+
+
+# Everything sequential_to_spec can convert. Only these classes may be unpickled from a .pt file.
+_IMPORTABLE = (nn.Sequential, *_SIMPLE, nn.Linear, nn.Conv1d, nn.Conv2d, nn.MaxPool2d, nn.AvgPool2d,
+               nn.AdaptiveAvgPool2d, nn.BatchNorm1d, nn.BatchNorm2d, nn.LayerNorm, nn.Dropout,
+               nn.LeakyReLU, nn.Embedding)
+
+
+def _is_torchscript(p: Path) -> bool:
+    if not zipfile.is_zipfile(p):
+        return False
+    with zipfile.ZipFile(p) as z:
+        return any(n.endswith("/constants.pkl") for n in z.namelist())
+
+
+def _safe_load_module(p: Path):
+    """torch.load without running arbitrary code: a pickled .pt can execute anything on load, so
+    only tensors, state_dicts and the supported nn layers are allowed."""
+    try:
+        with torch.serialization.safe_globals(list(_IMPORTABLE)):
+            return torch.load(p, map_location="cpu", weights_only=True)
+    except pickle.UnpicklingError as e:
+        raise ValueError("This file contains layer types or code that AIForge can't load safely. "
+                         "Only nn.Sequential models built from supported layers (Linear, Conv, "
+                         "pooling, norm, dropout, activations, Embedding) can be imported.") from e
 
 
 def _flatten_modules(m: nn.Module) -> list[nn.Module]:
