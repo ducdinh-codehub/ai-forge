@@ -85,3 +85,14 @@ def test_chart_shares_the_epoch_axis():
     chart = LineChart("x")
     chart.set_series([("long", [1.0, 0.5, 0.2, 0.1]), ("short", [1.0, 0.4])])
     assert chart.labels == ["long", "short"] and chart.palette[:2] == ["cyan", "magenta"]
+
+
+@pytest.mark.parametrize("metric", ["val_acc", "val_loss"])
+def test_a_tie_goes_to_the_earliest_run(metric):
+    from aiforge.compare import Run
+
+    same = [{"epoch": 1, "val_acc": 0.9, "val_loss": 0.2}]
+    worse = [{"epoch": 1, "val_acc": 0.5, "val_loss": 0.9}]
+    runs = [Run("a", 0, "", "train", "", same, {}), Run("b", 0, "", "train", "", worse, {}),
+            Run("c", 0, "", "train", "", same, {})]
+    assert table(runs, metric)[2] == 0  # higher or lower is better: the first of the tied runs
