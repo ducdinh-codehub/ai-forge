@@ -227,3 +227,21 @@ def test_float16_with_loss_scaling_on_mps_resumes(tmp_path):
                    preprocess=info.preprocess).run(resume=ck)
     losses = [e["train_loss"] for e in rest["epochs"]]
     assert len(losses) == 3 and all(math.isfinite(l) for l in losses) and losses[-1] < losses[0]
+
+
+def test_checkpoint_save_waits_for_a_reader(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    from aiforge.trainer import save_checkpoint
+
+    real, calls = Path.replace, []
+
+    def busy_twice(self, target):  # what Windows does while another process reads the file
+        calls.append(target)
+        if len(calls) <= 2:
+            raise PermissionError("file in use")
+        return real(self, target)
+
+    monkeypatch.setattr(Path, "replace", busy_twice)
+    save_checkpoint(tmp_path / "ck.pt", {"version": 1, "epoch": 3})
+    assert len(calls) == 3 and load_checkpoint(tmp_path / "ck.pt")["epoch"] == 3

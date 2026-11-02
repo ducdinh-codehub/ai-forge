@@ -119,7 +119,14 @@ def save_checkpoint(path: Path, state: dict) -> None:
     """Write via a temporary file so a crash mid-write never leaves a broken checkpoint."""
     tmp = path.with_name(path.name + ".tmp")
     torch.save(state, tmp)
-    tmp.replace(path)
+    for attempt in range(20):
+        try:
+            tmp.replace(path)
+            return
+        except PermissionError:  # Windows: someone is reading the old checkpoint right now
+            if attempt == 19:
+                raise
+            time.sleep(0.05)
 
 
 def load_checkpoint(path: Path) -> dict | None:

@@ -62,8 +62,11 @@ def test_train_screen_resumes_an_unfinished_run(tmp_path):
             button.press()
             for _ in range(400):
                 await pilot.pause(0.05)
-                if pipeline.interrupted_run(ws, "spiral") is None and not screen.trainer:
+                # Watch the screen, not the checkpoint file: reading it while training replaces it
+                # is what Windows can't do.
+                if len(screen.loss_hist) == 4 and not screen.trainer:
                     break
+            assert pipeline.interrupted_run(ws, "spiral") is None  # finished: nothing left to resume
             assert screen.query_one("#max_samples").value == "500"  # the run's own settings
             assert len(screen.loss_hist) == 4  # earlier epochs redrawn, then the rest
             assert not button.display
