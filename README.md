@@ -576,7 +576,8 @@ docs/make_demo_gif.py      regenerates the demo animation at the top of this REA
 
 **Release:** move the *Unreleased* notes in [CHANGELOG.md](CHANGELOG.md) under the new version, bump
 `__version__` in `aiforge/__init__.py`, merge to `main`, then push a matching tag
-(`git tag v0.1.9 && git push origin v0.1.9`). GitHub Actions builds it and publishes it to PyPI.
+(`git tag v0.2.0 && git push origin v0.2.0`). GitHub Actions builds it, publishes it to PyPI and
+creates the GitHub Release from its CHANGELOG notes (it stops before publishing if there are none).
 Every pull request runs the tests on Linux, macOS and Windows first.
 
 Built with [PyTorch](https://pytorch.org) and [Textual](https://textual.textualize.io) ·

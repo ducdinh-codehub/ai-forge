@@ -74,8 +74,9 @@ def table(runs: list[Run], metric: str) -> tuple[list[str], list[list[str]], int
                      fmt(metric, r.best(metric)), fmt(metric, values[-1] if values else None)]
                     + [str(r.config.get(k, "-")) for k in varying])
     bests = [r.best(metric) for r in runs]
-    scored = [(b, i) for i, b in enumerate(bests) if b is not None]
+    scored = [i for i, b in enumerate(bests) if b is not None]
     if not scored:
         return header, rows, None
     pick = min if METRICS[metric][2] == "min" else max
-    return header, rows, pick(scored)[1]
+    # Compare scores only: on a tie the earliest run wins (min/max return the first best item).
+    return header, rows, pick(scored, key=lambda i: bests[i])
