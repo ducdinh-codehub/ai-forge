@@ -87,6 +87,10 @@ def add_commands(parser: argparse.ArgumentParser, common: argparse.ArgumentParse
     p.add_argument("-o", "--out", help="Where --file writes its CSV (default: next to the input)")
     p.add_argument("-k", "--top-k", type=int, default=5, help="How many guesses to show")
 
+    p = sub.add_parser("explain", parents=[common], help="Show why a model gave its answer for one input")
+    p.add_argument("model")
+    p.add_argument("input", help="Comma-separated values, a sentence, or an image path (quote it)")
+
     p = sub.add_parser("generate", parents=[common], help="Let a language model write text")
     p.add_argument("model")
     p.add_argument("prompt", nargs="?", default="", help="Start of the text (optional)")
@@ -357,6 +361,14 @@ def cmd_predict(ws, args) -> None:
         style = "b" if i == 0 else "dim" if p < 0.05 else ""
         line = f"{label:<{width}}  {p:6.1%}  {'█' * round(p * 30)}"
         out.print(f"[{style}]{line}[/]" if style else line)
+
+
+def cmd_explain(ws, args) -> None:
+    from .explain import explain, render
+
+    _need_weights(ws, args.model)
+    spec, model, _ = ws.load_model(args.model)
+    out.print(render(explain(spec, model, args.input)))
 
 
 def cmd_generate(ws, args) -> None:

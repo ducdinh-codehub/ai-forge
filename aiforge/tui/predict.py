@@ -15,7 +15,7 @@ BAR = 30
 
 
 class PredictScreen(Screen):
-    BINDINGS = [Binding("escape", "app.pop_screen", "Back")]
+    BINDINGS = [Binding("escape", "app.pop_screen", "Back"), Binding("ctrl+e", "explain", "Explain")]
 
     def __init__(self, name: str):
         super().__init__()
@@ -31,12 +31,14 @@ class PredictScreen(Screen):
                 yield Input(id="raw", placeholder="type an input and press Enter")
                 yield Button("📂 Browse", id="browse-raw")
                 yield Button("Predict", id="go", variant="primary")
+                yield Button("🔍 Explain", id="explain", tooltip="Why this answer? (Ctrl+E)")
             with Horizontal(id="gen-row"):
                 yield Label("Length [dim](tokens)[/]")
                 yield Input("200", id="gen-length", type="integer")
                 yield Label("Temperature [dim](0 = safest, 1.5 = wild)[/]")
                 yield Input("0.8", id="gen-temp", type="number")
             yield Static("", id="result")
+            yield Static("", id="explanation")
             with Vertical(id="batch-section"):
                 yield Static("Batch prediction", classes="section-title")
                 yield Static("A CSV (one input per row) or a folder of images → a CSV with a prediction column.",
@@ -70,6 +72,7 @@ class PredictScreen(Screen):
         self.is_lm = self.spec.task == "language_model"
         self.query_one("#gen-row").display = self.is_lm
         self.query_one("#batch-section").display = not self.is_lm
+        self.query_one("#explain").display = not self.is_lm
         if self.is_lm:
             self.query_one("#raw", Input).placeholder = "e.g. Twinkle, twinkle  (Enter = write)"
             self.query_one("#go", Button).label = "✎ Write"
@@ -97,6 +100,30 @@ class PredictScreen(Screen):
             box.update("\n".join(lines))
         else:
             box.update("\n".join(f"[b]{label}: {v:.6g}[/b]" for label, v in res))
+
+    def action_explain(self) -> None:
+        self._explain()
+
+    @on(Button.Pressed, "#explain")
+    def _explain(self) -> None:
+        raw = self.query_one("#raw", Input).value
+        if self.is_lm or not raw.strip():
+            return
+        self._predict()  # show the answer that is being explained
+        box = self.query_one("#explanation", Static)
+        box.display = True
+        box.update("[dim]Working out why…[/]")
+        self._run_explain(raw)
+
+    @work(thread=True, exclusive=True, group="explain")
+    def _run_explain(self, raw: str) -> None:
+        from ..explain import explain, render
+
+        try:
+            text = render(explain(self.spec, self.model, raw))
+        except Exception as e:  # noqa: BLE001 - shown to the user
+            text = f"[red]Can't explain this: {e}[/]"
+        self.app.call_from_thread(self.query_one("#explanation", Static).update, text)
 
     # -- language models -------------------------------------------------------
 

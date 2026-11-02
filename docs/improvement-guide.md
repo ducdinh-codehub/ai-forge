@@ -30,7 +30,7 @@ A prioritised plan for making AIForge sturdier and more useful. Tick items off a
 - [ ] **Experiment comparison.** Overlay the curves of several runs or models on one chart.
 - [x] **More data sources.** Excel / Parquet; any Hugging Face dataset by name; image datasets given
   as a CSV of paths + labels.
-- [ ] **Explain a prediction.** Feature importance (tables), saliency heatmap (images, as terminal
+- [x] **Explain a prediction.** Feature importance (tables), saliency heatmap (images, as terminal
   block art), highlighted tokens (text).
 - [x] **"Training script" export.** A standalone `train.py` reproducing the run: data loading,
   config and loop. The path from no-code to real code.

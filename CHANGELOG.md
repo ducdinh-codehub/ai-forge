@@ -17,6 +17,9 @@ and versions follow [Semantic Versioning](https://semver.org/) (still `0.x`: any
 - **More data sources.** Excel (`.xlsx`) and Parquet tables, images listed in a table (a path
   column + a label column), and any Hugging Face dataset by name (`-d hf:imdb`). Install the extra
   packages with `pip install "aiforge-studio[data]"`.
+- **Explain a prediction.** 🔍 Explain on the Use screen and `aiforge explain`: which features or
+  words pushed the model towards its answer or away from it, and a heat map of where an image
+  model looks.
 - Tests for the core modules: every template builds, exports to ONNX and TorchScript, and round-trips.
 - `docs/improvement-guide.md`: the roadmap.
 - Docs: CPU-only install (a ~200 MB PyTorch instead of ~2 GB).

@@ -37,7 +37,10 @@ def training_script(spec: ModelSpec, cfg: TrainConfig) -> str:
         data_code = _CSV_COMMON + _CSV_TABLE
     elif source == "csv_text":
         data_code = _CSV_COMMON + _CSV_TEXT
-    elif source == "hf" and len(spec.input_shape) != 3:
+    elif source == "hf":
+        if len(spec.input_shape) == 3:
+            raise ValueError("Training scripts don't support Hugging Face image datasets yet - export the "
+                             "PyTorch code instead, or train on an image folder.")
         data_code = _HF_ROWS + (_CSV_TEXT if spec.input_dtype == "long" else _CSV_TABLE)
     elif source == "image_folder":
         data_code = _IMAGE_FOLDER

@@ -177,6 +177,10 @@ reset the output layer, and save under a **new name** so the original stays safe
 
 Give it a whole CSV or image folder for **batch prediction** (writes a CSV with predictions).
 
+**🔍 Explain** (`Ctrl+E`) shows *why* the model gave its answer: which features or words pushed
+it towards the answer (green) or away from it (red), and for images a heat map of where it looks.
+Command line: `aiforge explain spiral "0.1, 0.45"`.
+
 ### Evaluate: how good is it really?
 Press `v` (📊 **Evaluate**), choose the data (the validation / test data from training, or a
 separate file or folder with the true answers) and click **▶ Evaluate** (`Ctrl+R`). The report:
@@ -402,6 +406,7 @@ aiforge list
 | Force full precision / load images with 4 processes | `--precision fp32` · `--workers 4` |
 | Train on a Hugging Face dataset | `aiforge train reviews -d hf:imdb` (`hf:NAME:SUBSET`, `--split test`) |
 | Train on an Excel file / a table of image paths | `-d sales.xlsx` · `-d photos.csv` (image models; `--image-column file`) |
+| See why it gave an answer | `aiforge explain fruit "6.1, 2.7, green"` |
 | Pick the CSV column to predict | `--target price` (text classifiers: also `--text-column review`) |
 | Stop early | `Ctrl+C`: stops after the current batch and keeps the best epoch |
 
