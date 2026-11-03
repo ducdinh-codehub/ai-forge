@@ -13,6 +13,7 @@
   <br>
   <img alt="status alpha" src="https://img.shields.io/badge/status-alpha-E05D44?style=flat">
   <a href="https://github.com/ducdinh-codehub/ai-forge/commits/main"><img alt="development active" src="https://img.shields.io/badge/development-active-44CC11?style=flat"></a>
+  <a href="https://github.com/ducdinh-codehub/ai-forge/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/ducdinh-codehub/ai-forge?style=flat&color=E3B341"></a>
 </p>
 
 **Build, train and use your own AI models in the terminal, without writing any code.**
@@ -29,6 +30,9 @@ With the mouse or keyboard you can:
 6. **Export** it for Python, ONNX Runtime, mobile apps and more
 
 No PyTorch or Python knowledge needed. The built-in **Guide** (`g`) teaches the ML basics.
+
+⭐ **If AIForge helps you, please [star it on GitHub](https://github.com/ducdinh-codehub/ai-forge).** It helps other
+people find the project and keeps it going.
 
 ## Contents
 
@@ -247,6 +251,12 @@ account is needed, and nothing is sent before you submit). You choose what is at
 
 Your home folder is shown as `~` in paths. The report is also copied to the clipboard and
 saved in `exports/issue-reports/`, in case no browser opens (e.g. over SSH).
+
+### Star the project
+Press `*` on the Home screen, click *star it on GitHub* in the welcome text, or pick **Star AIForge
+on GitHub** in the `Ctrl+P` palette. AIForge opens the project page in your browser and you click
+**⭐ Star** there (it never touches your GitHub account). After your first successful training it
+asks once; *Maybe later* asks again five trainings later, *Don't ask again* means never.
 
 ---
 

@@ -49,6 +49,11 @@ class AIForgeApp(App):
     def action_toggle_theme(self) -> None:
         self.theme = LIGHT_THEME if self.current_theme.dark else DARK_THEME
 
+    def action_star(self) -> None:
+        from .star import open_repo
+
+        open_repo(self)
+
     # -- reporting problems ------------------------------------------------------
 
     def notify(self, message, *, title="", severity="information", timeout=None, markup=True) -> None:
@@ -66,6 +71,8 @@ class AIForgeApp(App):
                             self.action_report_issue)
         yield SystemCommand("Take the guided tour", "Build, train and use a first model, step by step",
                             self.action_tour)
+        yield SystemCommand("Star AIForge on GitHub", "Open the project page so you can give it a ⭐ - thank you!",
+                            self.action_star)
 
     def _current_spec(self):
         """The model the user is looking at, so a report can include its structure."""
