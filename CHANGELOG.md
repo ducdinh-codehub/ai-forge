@@ -5,7 +5,7 @@ and versions follow [Semantic Versioning](https://semver.org/) (still `0.x`: any
 
 ## [Unreleased]
 
-## [0.2.1] - 2026-11-03
+## [0.2.2] - 2026-11-03
 
 ### Added
 - **Star AIForge on GitHub** from the app: `*` on the Home screen, a link in the welcome text, or
@@ -15,6 +15,10 @@ and versions follow [Semantic Versioning](https://semver.org/) (still `0.x`: any
 ### Fixed
 - **Compare:** when two runs tie for the best score, the earliest one is now starred as best
   (it used to depend on the metric whether the first or the last tied run was picked).
+
+### Note
+- There is no 0.2.1 on PyPI: its tag was pushed before the version bump was merged, so it was
+  never published. 0.2.2 is that release.
 
 ## [0.2.0] - 2026-11-02
 
@@ -113,8 +117,8 @@ and versions follow [Semantic Versioning](https://semver.org/) (still `0.x`: any
 - First release: design a network from a list of layers, train it, use it and export it, all
   in the terminal. Built-in Guide and resizable panels.
 
-[Unreleased]: https://github.com/ducdinh-codehub/ai-forge/compare/v0.2.1...HEAD
-[0.2.1]: https://github.com/ducdinh-codehub/ai-forge/compare/v0.2.0...v0.2.1
+[Unreleased]: https://github.com/ducdinh-codehub/ai-forge/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/ducdinh-codehub/ai-forge/compare/v0.2.0...v0.2.2
 [0.2.0]: https://github.com/ducdinh-codehub/ai-forge/compare/v0.1.9...v0.2.0
 [0.1.9]: https://github.com/ducdinh-codehub/ai-forge/compare/v0.1.8...v0.1.9
 [0.1.8]: https://github.com/ducdinh-codehub/ai-forge/compare/v0.1.7...v0.1.8
