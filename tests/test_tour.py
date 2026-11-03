@@ -72,7 +72,8 @@ def test_tour_walks_the_quick_start(tmp_path):
             assert str(app.screen.query_one("#tour-end").label) == "Finish"
             await pilot.click("#tour-end")
             await _until(pilot, lambda: app.tour is None)
-            assert not app.screen.query(".coach") and not _outlined(app)
+            await _until(pilot, lambda: not app.screen.query(".coach"))  # removed a moment later
+            assert not _outlined(app)
 
     asyncio.run(scenario())
 
@@ -85,8 +86,7 @@ def test_offered_once_and_not_to_people_with_models(tmp_path):
             offered = _coach_says(app, "New here?")
             if offered:
                 await pilot.click("#tour-no")
-                await pilot.pause(0.1)
-                assert not app.screen.query(".coach")
+                await _until(pilot, lambda: not app.screen.query(".coach"))
             return offered
 
     assert asyncio.run(launch(tmp_path / "a")) is True
@@ -106,7 +106,8 @@ def test_f2_restarts_and_skip_ends_it(tmp_path):
             await _until(pilot, lambda: _coach_says(app, "Step 1 of 5"))
             await pilot.click("#tour-end")
             await _until(pilot, lambda: app.tour is None)
-            assert not app.screen.query(".coach") and not _outlined(app)
+            await _until(pilot, lambda: not app.screen.query(".coach"))  # removed a moment later
+            assert not _outlined(app)
 
     asyncio.run(scenario())
 
