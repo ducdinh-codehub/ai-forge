@@ -5,6 +5,11 @@ and versions follow [Semantic Versioning](https://semver.org/) (still `0.x`: any
 
 ## [Unreleased]
 
+### Added
+- **Star AIForge on GitHub** from the app: `*` on the Home screen, a link in the welcome text, or
+  the `Ctrl+P` palette. After your first successful training AIForge asks once, politely
+  (*Maybe later* / *Don't ask again*), and never during the guided tour.
+
 ## [0.2.0] - 2026-11-02
 
 ### Added

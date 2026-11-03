@@ -29,6 +29,7 @@ Build, train and share neural networks - no code needed.
 
 Already have a model? Press [reverse] i [/reverse] to import it.
 Found a bug or have an idea? Press [reverse] Ctrl+O [/reverse] to tell us on GitHub.
+Like AIForge? Press [reverse] * [/reverse] or [@click=app.star][u]star it on GitHub[/u][/] - it really helps.
 
 [dim]New here? Press [b]F2[/b] for a 5-minute guided tour, or [b]g[/b] for the beginner lessons.[/dim]"""
 
@@ -52,6 +53,7 @@ class HomeScreen(Screen):
         Binding("r", "rename", "Rename", show=False),
         Binding("delete,d", "delete", "Delete", show=False),
         Binding("f2", "app.tour", "Guided tour", show=False),
+        Binding("asterisk", "app.star", "Star on GitHub", show=False),
         Binding("q", "app.quit", "Quit"),
     ]
 
@@ -113,6 +115,9 @@ class HomeScreen(Screen):
 
     def on_screen_resume(self) -> None:
         self.refresh_models(keep=self.selected)
+        from .star import offer
+
+        offer(self)
 
     @property
     def ws(self):

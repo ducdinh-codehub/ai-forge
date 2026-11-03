@@ -17,7 +17,8 @@ from pathlib import Path
 from . import __version__
 
 REPO = "ducdinh-codehub/ai-forge"
-NEW_ISSUE = f"https://github.com/{REPO}/issues/new"
+REPO_URL = f"https://github.com/{REPO}"
+NEW_ISSUE = f"{REPO_URL}/issues/new"
 # Browsers and GitHub reject very long URLs; past this the body is shortened in the link and the
 # full report goes to the clipboard instead.
 MAX_URL = 7000

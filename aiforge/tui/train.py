@@ -18,6 +18,7 @@ from ..spec import ModelSpec, safe_name
 from ..textgen import TOKENIZERS
 from .chart import LineChart
 from .resize import DEFAULT_FRACTION, MAX_FRACTION, MIN_FRACTION, ResizeHandle
+from .star import count_training
 from .sysmon import SystemPanel
 from ..trainer import (PRECISIONS, TrainConfig, Trainer, available_devices, data_mismatch, fit_spec_to_data,
                        pick_device, reset_head)
@@ -783,6 +784,7 @@ class TrainScreen(Screen):
         self.ws.save_spec(self.spec)
         self.ws.save_weights(save_as, model)
         self.ws.append_history(save_as, run)
+        count_training(self.ws)
         last = run["epochs"][-1]
         metric = (f", val acc {last['val_acc']:.1%}" if "val_acc" in last else
                   f", val MAE {last['val_mae']:.4g}" if "val_mae" in last else
