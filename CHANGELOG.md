@@ -5,6 +5,11 @@ and versions follow [Semantic Versioning](https://semver.org/) (still `0.x`: any
 
 ## [Unreleased]
 
+### Added
+- **Guide:** new ML-basics lesson *3. Three ways to learn* explains supervised, unsupervised and
+  reinforcement learning in plain words, with everyday examples and a "which one do I need?"
+  checklist. The lessons after it are renumbered (4–8).
+
 ## [0.2.2] - 2026-11-03
 
 ### Added

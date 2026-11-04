@@ -94,7 +94,7 @@ Think of a student preparing for an exam:
   use them only to check how well it really learned.
 
 If the model scores well on homework but badly on the mock exam, it **memorized** instead of
-**understanding**. That's called *overfitting* (see lesson 5).
+**understanding**. That's called *overfitting* (see lesson 6).
 
 AIForge splits the data for you. You can change the split on the Train screen.
 
@@ -106,8 +106,69 @@ AIForge splits the data for you. You can change the split on the Train screen.
 - ✅ **Looks like real life**: train on the same kind of photos/text you will use later.
 """
 
+LEARNING_TYPES = """\
+# 3. Three ways to learn: supervised, unsupervised, reinforcement
+
+> **In short:** the difference is **what the model is given to learn from**: answers,
+> no answers, or rewards.
+
+| | Supervised | Unsupervised | Reinforcement |
+|---|---|---|---|
+| **Learns from** | Examples **with the right answer** (labels) | Examples **with no answers** | **Rewards and penalties** from trying things |
+| **Goal** | Predict the answer for new examples | Find hidden groups or patterns | Learn which actions win the most reward |
+| **Everyday comparison** | A student with an answer key | Sorting a pile of photos into groups nobody named | Learning to ride a bike by falling and trying again |
+| **Examples** | Spam filter · house prices · cat vs. dog | Customer groups · unusual bank payments · topics in news | Game-playing AI · robots learning to walk · self-driving practice |
+
+## Supervised learning
+
+You give the model **inputs and their correct labels**, like the house table in lesson 2
+(size, bedrooms, city → **price**). It learns to map inputs to answers, and checks itself
+against the labels while it trains.
+
+Its two big question types are **classification** and **regression** (next lesson).
+**Everything you train in AIForge is supervised learning.**
+
+## Unsupervised learning
+
+There are **no labels**. The model looks only at the inputs and finds structure by itself:
+
+- **Clustering**: put similar examples together, e.g. shoppers who buy alike.
+- **Anomaly detection**: spot the example that doesn't fit, e.g. a strange bank payment.
+- **Dimensionality reduction**: squeeze many columns into a few that keep the important
+  information, e.g. to draw the data on a 2-D chart.
+
+The model can say *"these belong together"*, but **you** decide what each group means.
+
+## Reinforcement learning
+
+An **agent** acts in an **environment**. After each action it gets a **reward** (good) or a
+**penalty** (bad). Nobody tells it the right move; it learns by **trial and error** which
+actions bring the most reward over time.
+
+```text
+            action
+   ┌──────────────────┐
+   │                  ▼
+[agent]         [environment]
+   ▲                  │
+   └──────────────────┘
+    new state + reward
+```
+
+Like training a dog: you don't explain the rules, you give a treat when it does the right
+thing. Reinforcement learning is also one step in training chatbots like ChatGPT and Claude:
+people rate the answers, and the model learns to give the kind that rates well.
+
+## Which one do I need?
+
+- You have **examples with the right answers** → **supervised** (that's AIForge).
+- You have **data but no answers** and want to find groups or oddities → **unsupervised**.
+- You need an agent that **makes decisions step by step** and can try again and again
+  → **reinforcement**.
+"""
+
 TASKS = """\
-# 3. Two kinds of questions: classification and regression
+# 4. Two kinds of questions: classification and regression
 
 > **In short:** *"which group?"* is **classification**. *"how much?"* is **regression**.
 
@@ -138,7 +199,7 @@ if it doesn't match your data.
 """
 
 TRAINING = """\
-# 4. How a neural network learns
+# 5. How a neural network learns
 
 > **In short:** guess → measure the mistake → adjust the knobs a little → repeat
 > thousands of times.
@@ -175,7 +236,7 @@ the left, you adjust, and you throw again. After many throws you rarely miss.
 """
 
 FITTING = """\
-# 5. Overfitting and underfitting
+# 6. Overfitting and underfitting
 
 > **In short:** a good model **understands** the pattern. An overfit model **memorized**
 > the homework. An underfit model **didn't learn enough**.
@@ -217,19 +278,19 @@ AIForge's Train screen reads the charts for you and tells you which one is happe
 """
 
 WORKFLOW = """\
-# 6. Your first project, step by step
+# 7. Your first project, step by step
 
 > **In short:** pick a model type → pick data → train → check → use or improve.
 
 1. **Know your question.** Is it *"which group?"* (classification) or *"how much?"*
-   (regression)? See lesson 3.
+   (regression)? See lesson 4.
 2. **Look at your data.** A table (CSV), photos, or text? That decides the **model type**.
    See *Part 2: Model types* in this guide.
 3. **Create the model** (press `n` on the home screen). Choose the model type, then keep the
    first template. Templates are tested starting points.
 4. **Train** (`Ctrl+R`). Watch the loss go down. Start small: a few epochs first.
 5. **Check the result.** Is the validation score good enough? Do the two loss lines stay
-   together? See lesson 5.
+   together? See lesson 6.
 6. **Improve one thing at a time.** Change one setting, train again, compare. Changing many
    things at once makes it impossible to know what helped.
 7. **Use it.** Try predictions on new examples, then **export** it for other programs.
@@ -493,7 +554,7 @@ Text    : Embedding → LSTM → Linear
 """
 
 EVALUATING = """\
-# 7. Is my model any good?
+# 8. Is my model any good?
 
 A high number on the training charts isn't proof. A good evaluation answers three questions:
 **how often is it right, where does it go wrong, and can I trust it?** Press **`v`** on the
@@ -542,7 +603,7 @@ Testing on training examples is like grading a student with the exact exam they 
   hide a group where the model fails, which is also a fairness problem.
 - **Robustness:** add a little noise to the inputs. A model whose score collapses is fragile.
 - **Learning curves:** training and validation scores far apart = overfitting; both low =
-  underfitting (see lesson 5).
+  underfitting (see lesson 6).
 - **Model A vs B:** a small difference can be pure luck. A significance test (McNemar for
   classification, a paired bootstrap for regression) tells you if it's real: p < 0.05 means
   "probably not chance".
@@ -562,11 +623,12 @@ mistakes.
 LESSONS: dict[str, tuple[str, str]] = {
     "learn:what": ("1. What is ML?", WHAT_IS_ML),
     "learn:data": ("2. Data & labels", DATA),
-    "learn:tasks": ("3. Classify or predict?", TASKS),
-    "learn:training": ("4. How models learn", TRAINING),
-    "learn:fitting": ("5. Over/underfitting", FITTING),
-    "learn:workflow": ("6. Your first project", WORKFLOW),
-    "learn:evaluate": ("7. Is my model good?", EVALUATING),
+    "learn:kinds": ("3. Supervised, unsup., RL", LEARNING_TYPES),
+    "learn:tasks": ("4. Classify or predict?", TASKS),
+    "learn:training": ("5. How models learn", TRAINING),
+    "learn:fitting": ("6. Over/underfitting", FITTING),
+    "learn:workflow": ("7. Your first project", WORKFLOW),
+    "learn:evaluate": ("8. Is my model good?", EVALUATING),
     "learn:choose": ("Which type to choose?", CHOOSE_TYPE),
     "learn:tabular": ("📊 Tabular data", TABULAR),
     "learn:vision": ("🖼 Computer vision", VISION),
@@ -574,8 +636,8 @@ LESSONS: dict[str, tuple[str, str]] = {
     "learn:manual": ("✎ Build manually", MANUAL_LESSON),
 }
 
-BASICS = ["learn:what", "learn:data", "learn:tasks", "learn:training", "learn:fitting",
-          "learn:workflow", "learn:evaluate"]
+BASICS = ["learn:what", "learn:data", "learn:kinds", "learn:tasks", "learn:training",
+          "learn:fitting", "learn:workflow", "learn:evaluate"]
 TYPES = ["learn:choose", "learn:tabular", "learn:vision", "learn:language", "learn:manual"]
 
 
