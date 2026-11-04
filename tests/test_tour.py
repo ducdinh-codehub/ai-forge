@@ -137,6 +137,7 @@ def test_agent_tour_walks_a_first_agent(tmp_path):
             await _until(pilot, lambda: _coach_says(app, "Reinforcement"))
             assert _outlined(app) == ["style-reinforcement"]
             assert app.screen.query_one("#name", Input).value == "grid-explorer"
+            await _until(pilot, lambda: app.screen.query_one("#style-reinforcement").region.width > 0)
             await pilot.click("#style-reinforcement")
             await _until(pilot, lambda: _coach_says(app, "GridWorld agent"))
             app.screen.submit()
@@ -191,6 +192,8 @@ def test_agent_tour_is_offered_on_a_new_agents_train_screen(tmp_path):
             await pilot.pause(0.3)
             await app.push_screen(TrainScreen("pole", finetune=False))
             await _until(pilot, lambda: _coach_says(app, "First agent?"))
+            # The bar was just added: click only once it is laid out (slow CI machines lag behind).
+            await _until(pilot, lambda: app.screen.query_one("#agent-tour-start").region.width > 0)
             await pilot.click("#agent-tour-start")
             await _until(pilot, lambda: _coach_says(app, "CartPole"))  # starts right here, in its own world
             assert app.tour.steps[app.tour.i].screen == "TrainScreen"
