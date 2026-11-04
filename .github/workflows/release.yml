@@ -31,12 +31,31 @@ jobs:
       - run: pip install build
       - run: python -m build
       - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true  # a re-run (e.g. after a GitHub outage) doesn't fail on files already on PyPI
       - name: Create the GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+        # GitHub sometimes answers 502 for a moment: try a few times. If the release already exists
+        # (an earlier attempt got halfway), only add the files it is missing, so the attached files
+        # always stay the ones that went to PyPI.
         run: |
-          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
-            echo "Release $GITHUB_REF_NAME already exists"; exit 0
-          fi
-          gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --latest \
-            --title "AIForge ${GITHUB_REF_NAME#v}" --notes-file notes.md
+          for attempt in 1 2 3 4; do
+            if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+              have=$(gh release view "$GITHUB_REF_NAME" --json assets -q '.assets[].name') || have=""
+              missing=""
+              for f in dist/*; do
+                printf '%s\n' "$have" | grep -qxF "$(basename "$f")" || missing="$missing $f"
+              done
+              if [ -z "$missing" ]; then echo "Release $GITHUB_REF_NAME is complete"; exit 0; fi
+              # shellcheck disable=SC2086  # several files on purpose
+              gh release upload "$GITHUB_REF_NAME" $missing && exit 0
+            elif gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --latest \
+                   --title "AIForge ${GITHUB_REF_NAME#v}" --notes-file notes.md; then
+              exit 0
+            fi
+            echo "GitHub didn't answer (attempt $attempt of 4): trying again in $((attempt * 20))s"
+            sleep $((attempt * 20))
+          done
+          echo "Couldn't create the GitHub Release. The package is on PyPI: re-run this job to finish."
+          exit 1
