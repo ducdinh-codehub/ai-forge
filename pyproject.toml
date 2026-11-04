@@ -10,7 +10,9 @@ requires-python = ">=3.10"
 keywords = ["no-code", "deep-learning", "machine-learning", "neural-network", "pytorch", "model-builder",
             "tui", "terminal", "textual", "transfer-learning", "fine-tuning", "cnn", "transformer",
             "computer-vision", "text-classification", "onnx", "education", "beginner-friendly", "automl",
-            "training", "visual-model-builder", "deep-learning-gui"]
+            "training", "visual-model-builder", "deep-learning-gui",
+            "unsupervised-learning", "clustering", "k-means", "pca", "autoencoder", "anomaly-detection",
+            "reinforcement-learning", "deep-q-network", "dqn", "q-learning", "gridworld", "cartpole"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",
