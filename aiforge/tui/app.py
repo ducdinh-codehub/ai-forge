@@ -46,6 +46,19 @@ class AIForgeApp(App):
 
         start(self)
 
+    def action_agent_tour(self) -> None:
+        """Walk through a first reinforcement-learning agent. On an agent's Train screen it starts
+        there; anywhere else it starts on the home screen."""
+        from .tour import AGENT_STEPS, start
+
+        screen = self.screen
+        if type(screen).__name__ == "TrainScreen" and getattr(screen, "rl", False):
+            return start(self, AGENT_STEPS, first=next(i for i, s in enumerate(AGENT_STEPS)
+                                                       if s.screen == "TrainScreen"))
+        if type(screen).__name__ != "HomeScreen":
+            self.notify("The agent tour starts on the home screen: press Esc to go back there.", timeout=8)
+        start(self, AGENT_STEPS)
+
     def action_toggle_theme(self) -> None:
         self.theme = LIGHT_THEME if self.current_theme.dark else DARK_THEME
 
@@ -71,6 +84,8 @@ class AIForgeApp(App):
                             self.action_report_issue)
         yield SystemCommand("Take the guided tour", "Build, train and use a first model, step by step",
                             self.action_tour)
+        yield SystemCommand("Take the agent tour", "Train a reinforcement-learning agent, watch it play and "
+                            "test it, step by step", self.action_agent_tour)
         yield SystemCommand("Star AIForge on GitHub", "Open the project page so you can give it a ⭐ - thank you!",
                             self.action_star)
 

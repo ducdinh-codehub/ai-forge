@@ -16,6 +16,8 @@ METRICS = {
     "train_ppl": ("Training perplexity", "{:.3g}", "min"),
     "val_kept": ("Validation variation kept", "{:.1%}", "max"),
     "val_silhouette": ("Validation silhouette", "{:.3f}", "max"),
+    "val_reward": ("Tested reward", "{:.4g}", "max"),
+    "avg_reward": ("Reward (average of 20 episodes)", "{:.4g}", "max"),
 }
 SETTINGS = ("lr", "batch_size", "optimizer", "scheduler", "weight_decay", "precision")
 

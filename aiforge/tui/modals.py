@@ -147,7 +147,9 @@ STYLE_CARDS = {  # learning style -> (card label, hint under the cards)
     "unsupervised": ("🔍 Unsupervised\n[dim]no answers needed[/]",
                      "Finds structure by itself: groups, oddities and a map of your data. "
                      "Labels are optional, only to check the result."),
-    "reinforcement": ("🎮 Reinforcement\n[dim]coming soon[/]", ""),
+    "reinforcement": ("🎮 Reinforcement\n[dim]learns from rewards[/]",
+                      "An agent learns to act in a world by trial and error: rewards for good moves, "
+                      "penalties for bad ones. No dataset needed. First time? Ctrl+P → agent tour."),
 }
 
 

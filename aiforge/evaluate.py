@@ -629,6 +629,145 @@ def evaluate_model(spec: ModelSpec, model: nn.Module, ds, ref_labels, descriptio
 
 
 # ---------------------------------------------------------------------------
+# Reinforcement learning (an agent acting in its environment)
+# ---------------------------------------------------------------------------
+
+
+def evaluate_agent(spec: ModelSpec, model: nn.Module, episodes: int = 100, history: list[dict] | None = None,
+                   progress: Callable[[str, int, int], None] | None = None, seed: int = 0) -> dict:
+    """Let the agent play ``episodes`` test episodes without exploring, and an agent that picks
+    random actions play the very same ones (same starts and maps) as the baseline."""
+    from . import rl
+
+    progress = progress or (lambda *a: None)
+    pre = spec.data.get("preprocess", {})
+    if pre.get("type") != "env":
+        raise ValueError("This agent has no environment saved - train it in AIForge first.")
+    model.cpu().eval()
+    env, base_env = rl.make_env(pre, seed), rl.make_env(pre, seed)
+    played, random_played = [], []
+    rng = np.random.default_rng(seed)
+    for i in range(episodes):
+        played.append(rl.play(model, env))
+        random_played.append(rl.play(None, base_env, rng=rng))
+        progress("Playing test episodes", i + 1, episodes)
+    m, b = rl.run_stats(played, env), rl.run_stats(random_played, base_env)
+    actions = np.bincount([a for e in played for a in e.actions], minlength=len(env.actions))
+    m["actions"] = {name: float(n / max(1, actions.sum())) for name, n in zip(env.actions, actions)}
+    endings: dict[str, int] = {}
+    for e in played:
+        endings[e.event] = endings.get(e.event, 0) + 1
+    order = np.argsort([e.reward for e in played])
+    rep = {"model": spec.name, "task": spec.task, "env": env.name, "max_steps": env.max_steps,
+           "date": time.strftime("%Y-%m-%d %H:%M"),
+           "data": f"{episodes} test episodes of {env.describe()}", "warnings": [], "metrics": m, "baseline": b,
+           "endings": sorted(endings.items(), key=lambda kv: -kv[1]),
+           "rewards": [round(e.reward, 3) for e in played],
+           "best": {"reward": played[order[-1]].reward, "steps": played[order[-1]].steps,
+                    "event": played[order[-1]].event, "frame": played[order[-1]].frame},
+           "worst": {"reward": played[order[0]].reward, "steps": played[order[0]].steps,
+                     "event": played[order[0]].event, "frame": played[order[0]].frame}}
+    top = max(m["actions"].values()) if m["actions"] else 0
+    if top > 0.9 and len(env.actions) > 1:
+        rep["warnings"].append(f"The agent almost always picks the same action ({top:.0%}): it may have "
+                               "found a shortcut that only works sometimes. Train longer or explore longer.")
+    if m["reward"] <= b["reward"]:
+        rep["warnings"].append("The agent does no better than random moves.")
+    rep["learning"] = _agent_learning(history or [])
+    rep["verdict"] = _agent_verdict(rep)
+    return rep
+
+
+def _agent_learning(history: list[dict]) -> dict | None:
+    run = next((r for r in reversed(history) if r.get("epochs") and "reward" in r["epochs"][0]), None)
+    if run is None:
+        return None
+    ep = run["epochs"]
+    k = max(1, len(ep) // 10)
+    first, last = float(np.mean([e["reward"] for e in ep[:k]])), float(np.mean([e["reward"] for e in ep[-k:]]))
+    tests = [(e["epoch"], e["val_reward"]) for e in ep if "val_reward" in e]
+    best = max(tests, key=lambda t: t[1]) if tests else None
+    res = {"episodes": len(ep), "first": first, "last": last, "best_episode": best[0] if best else None,
+           "best_test": best[1] if best else None}
+    if best and best[0] < len(ep) * 0.6 and tests[-1][1] < best[1] - abs(best[1]) * 0.2:
+        res["text"] = (f"The tested reward peaked at episode {best[0]} and then dropped: the agent un-learned a "
+                       "good habit (common in RL). AIForge kept the best version. A lower learning rate helps.")
+    elif last > first:
+        res["text"] = (f"The reward per episode rose from {first:.3g} (first {k} episodes) to {last:.3g} "
+                       f"(last {k}): the agent learned from its rewards.")
+    else:
+        res["text"] = "The reward per episode didn't rise: more episodes or a longer exploration phase may help."
+    return res
+
+
+def _agent_verdict(rep: dict) -> str:
+    m, b = rep["metrics"], rep["baseline"]
+    if rep["env"] == "gridworld":
+        if m["success"] >= 0.95:
+            return f"✅ Strong: reaches the goal in {m['success']:.0%} of the episodes (random moves: {b['success']:.0%})."
+        if m["success"] >= 0.7:
+            return f"👍 Good: reaches the goal in {m['success']:.0%} of the episodes (random moves: {b['success']:.0%})."
+        if m["reward"] > b["reward"]:
+            return f"⚠️ Weak: reaches the goal in only {m['success']:.0%} of the episodes."
+        return "❌ Not useful yet: no better than random moves."
+    if m["steps"] >= 0.975 * rep["max_steps"]:
+        return f"✅ Strong: balances the pole for {m['steps']:.0f} steps on average - the task is solved."
+    if m["steps"] >= 0.5 * rep["max_steps"]:
+        return f"👍 Good: balances the pole for {m['steps']:.0f} of {rep['max_steps']} steps on average."
+    if m["steps"] > 1.5 * b["steps"]:
+        return f"⚠️ Weak: balances the pole for {m['steps']:.0f} steps on average (random pushes: {b['steps']:.0f})."
+    return "❌ Not useful yet: no better than random pushes."
+
+
+def _agent_markdown(rep: dict) -> str:
+    m, b = rep["metrics"], rep["baseline"]
+    md = [f"# Evaluation: {rep['model']}", "", f"**Data:** {rep['data']} · {rep['date']}", "",
+          f"## {rep['verdict']}", ""]
+    if rep["warnings"]:
+        md += [f"- ⚠️ {w}" for w in rep["warnings"]] + [""]
+    lo, hi = m["reward_ci"]
+    goal = "Reached the goal" if rep["env"] == "gridworld" else "Balanced all the way"
+    md += ["The agent played without exploring (always its best action). The baseline is an agent that "
+           "picks random actions, on the very same episodes.", "",
+           "## Metrics", "", "| Metric | Agent | Random agent | What it tells you |", "|---|---|---|---|",
+           f"| **Average reward** | **{m['reward']:.3g}** ({lo:.3g} to {hi:.3g}) | {b['reward']:.3g} | Total reward "
+           "per episode, with a 95% confidence interval. Higher is better. |",
+           f"| {goal} | {_pct(m['success'])} | {_pct(b['success'])} | Share of episodes that ended in success. |",
+           f"| Average steps | {m['steps']:.1f} | {b['steps']:.1f} | "
+           + ("Fewer is better: a short way to the goal. |" if rep["env"] == "gridworld" else
+              "More is better: the pole stayed up longer. |"),
+           f"| Worst / best reward | {m['reward_min']:.3g} / {m['reward_max']:.3g} | {b['reward_min']:.3g} / "
+           f"{b['reward_max']:.3g} | The spread between the luckiest and unluckiest episode. |", ""]
+    md += ["## How the episodes ended", "", "| Ending | Episodes |", "|---|---|"]
+    md += [f"| {event or '–'} | {n} |" for event, n in rep["endings"]]
+    md += ["", "## Reward per episode", "", "```text", _histogram(rep["rewards"]), "```", "",
+           "## Which actions it uses", "", "| Action | Share |", "|---|---|"]
+    md += [f"| {a} | {share:.0%}" + (f" `{'█' * round(share * 20)}`" if round(share * 20) else "") + " |"
+           for a, share in m["actions"].items()]
+    for key, title in (("best", "Best episode"), ("worst", "Worst episode")):
+        e = rep[key]
+        md += ["", f"## {title}: reward {e['reward']:.3g} in {e['steps']} step{'s' if e['steps'] != 1 else ''} "
+               f"({e['event']})", "",
+               "```text", e["frame"], "```"]
+    if rep["env"] == "gridworld":
+        md += ["", "*░░ marks the cells the agent walked through.*"]
+    lr = rep.get("learning")
+    if lr:
+        md += ["", "## Learning curve", lr["text"]]
+    return "\n".join(md)
+
+
+def _histogram(values: list[float], bins: int = 8, width: int = 30) -> str:
+    v = np.array(values)
+    if v.max() == v.min():
+        return f"all {len(v)} episodes: {v[0]:.3g}"
+    counts, edges = np.histogram(v, bins=bins)
+    top = counts.max()
+    return "\n".join(f"{edges[i]:>8.3g} to {edges[i + 1]:<8.3g} {'█' * max(1 if c else 0, round(c / top * width)):<{width}} {c}"
+                     for i, c in enumerate(counts))
+
+
+# ---------------------------------------------------------------------------
 # Unsupervised models (no right answers: groups, rebuilding, unusual examples)
 # ---------------------------------------------------------------------------
 
@@ -841,7 +980,7 @@ def _unsupervised_markdown(rep: dict) -> str:
 def compatible(spec_a: ModelSpec, spec_b: ModelSpec) -> bool:
     """Can model B be run on model A's evaluation data and compared fairly?"""
     pa, pb = spec_a.data.get("preprocess", {}), spec_b.data.get("preprocess", {})
-    if is_unsupervised(spec_a.task):
+    if is_unsupervised(spec_a.task) or spec_a.task == "reinforcement":
         return False  # no right answers to compare two models on
     if spec_a.task == "language_model":  # any input length works, but the token ids must mean the same
         return (spec_a.name != spec_b.name and spec_b.task == "language_model"
@@ -1025,6 +1164,8 @@ def report_markdown(rep: dict) -> str:
         return _language_model_markdown(rep)
     if is_unsupervised(rep["task"]):
         return _unsupervised_markdown(rep)
+    if rep["task"] == "reinforcement":
+        return _agent_markdown(rep)
     m, b = rep["metrics"], rep["baseline"]
     cls = rep["task"] == "classification"
     md = [f"# Evaluation: {rep['model']}", "",
@@ -1232,7 +1373,8 @@ def remember(rep: dict, model_dir: Path) -> None:
     keys = {"classification": ("accuracy", "macro_f1", "roc_auc"),
             "language_model": ("perplexity", "token_accuracy"),
             "clustering": ("silhouette", "spread"), "pca": ("kept", "rebuild_error"),
-            "autoencoder": ("kept", "rebuild_error")}.get(rep["task"], ("mae", "rmse", "r2"))
+            "autoencoder": ("kept", "rebuild_error"),
+            "reinforcement": ("reward", "success", "steps")}.get(rep["task"], ("mae", "rmse", "r2"))
     hist.append({"date": rep["date"], "data": rep["data"], **{k: m[k] for k in keys}})
     f.write_text(json.dumps(hist[-50:], indent=2))
 
@@ -1247,4 +1389,6 @@ def summary(h: dict) -> str:
         return f"silhouette {_num(h['silhouette'])} · spread {_num(h['spread'])}"
     if "kept" in h:
         return f"variation kept {_pct(h['kept'])} · rebuild error {_num(h['rebuild_error'])}"
+    if "reward" in h:
+        return f"reward {h['reward']:.3g} · success {_pct(h['success'])} · {h['steps']:.0f} steps"
     return f"MAE {h['mae']:.4g}" + (f" · R² {h['r2']:.3f}" if h.get("r2") is not None else "")

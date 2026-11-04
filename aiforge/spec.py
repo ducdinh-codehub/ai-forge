@@ -19,22 +19,34 @@ from .layers import REGISTRY, Shape, count_params, output_shape
 
 DTYPES = {"float": torch.float32, "long": torch.long}
 
-# What a model learns from: answers (labels) or the inputs alone.
+# What a model learns from: answers (labels), the inputs alone, or rewards from an environment.
 SUPERVISED_TASKS = ("classification", "regression", "language_model")
 UNSUPERVISED_TASKS = ("clustering", "pca", "autoencoder")
+REINFORCEMENT_TASKS = ("reinforcement",)
+STYLE_TASKS = {"supervised": SUPERVISED_TASKS, "unsupervised": UNSUPERVISED_TASKS,
+               "reinforcement": REINFORCEMENT_TASKS}
 # Classic algorithms are one fitted layer, not a network trained with gradients.
 CLASSIC_TASKS = {"clustering": "KMeans", "pca": "PCA"}
 TASK_LABELS = {"classification": "classification", "regression": "regression",
                "language_model": "language model", "clustering": "clustering (k-means)",
-               "pca": "dimensionality reduction (PCA)", "autoencoder": "autoencoder"}
+               "pca": "dimensionality reduction (PCA)", "autoencoder": "autoencoder",
+               "reinforcement": "reinforcement learning (agent)"}
 
 
 def is_unsupervised(task: str) -> bool:
     return task in UNSUPERVISED_TASKS
 
 
+def is_reinforcement(task: str) -> bool:
+    return task in REINFORCEMENT_TASKS
+
+
+def learning_style(task: str) -> str:
+    return next((style for style, tasks in STYLE_TASKS.items() if task in tasks), "supervised")
+
+
 def style_badge(task: str) -> str:
-    return "🔍" if is_unsupervised(task) else "🎯"
+    return {"supervised": "🎯", "unsupervised": "🔍", "reinforcement": "🎮"}[learning_style(task)]
 
 
 @dataclass
@@ -113,6 +125,8 @@ class ModelSpec:
         out = None if problems else self.output_shape()
         if is_unsupervised(self.task):
             return problems + self._unsupervised_problems(out)
+        if is_reinforcement(self.task) and out is not None:
+            return problems + self._agent_problems(out)
         if out is not None and self.task == "language_model":
             problems += self._language_model_problems(out)
             return problems
@@ -125,6 +139,17 @@ class ModelSpec:
                             f"{len(self.class_names)} classes. Set the last Linear's "
                             f"out_features to {len(self.class_names)}.")
         return problems
+
+    def _agent_problems(self, out: Shape) -> list[str]:
+        if self.input_dtype != "float" or len(self.input_shape) != 1:
+            return ["An agent reads a list of numbers (what it observes): set the input to 1D, type 'float'."]
+        if len(out) != 1:
+            return [f"An agent must output one score per action, a flat list, but this one outputs {out}."]
+        if self.class_names and out[0] != len(self.class_names):
+            return [f"Output has {out[0]} values but the agent has {len(self.class_names)} actions "
+                    f"({', '.join(self.class_names)}). Set the last Linear's out_features to "
+                    f"{len(self.class_names)}."]
+        return []
 
     def _unsupervised_problems(self, out: Shape | None) -> list[str]:
         if self.input_dtype != "float":
@@ -538,6 +563,15 @@ TEMPLATES: dict[str, dict] = {
                         _L("Conv2d", out_channels=4), _L("ReLU"), _L("MaxPool2d"),
                         _L("ConvTranspose2d", out_channels=16), _L("ReLU"),
                         _L("ConvTranspose2d", out_channels=1)]),
+    # --- reinforcement learning: agents (input = what they observe, output = one score per action) ---
+    "GridWorld agent (DQN)": dict(
+        input_shape=[75], task="reinforcement", env={"env": "gridworld", "size": 5, "traps": 3, "layout": "fixed"},
+        layers=lambda: [_L("Linear", out_features=128), _L("ReLU"), _L("Linear", out_features=128), _L("ReLU"),
+                        _L("Linear", out_features=4)]),
+    "CartPole agent (DQN)": dict(
+        input_shape=[4], task="reinforcement", env={"env": "cartpole", "max_steps": 200},
+        layers=lambda: [_L("Linear", out_features=64), _L("ReLU"), _L("Linear", out_features=64), _L("ReLU"),
+                        _L("Linear", out_features=2)]),
 }
 
 
@@ -573,7 +607,13 @@ UNSUPERVISED_TYPES: dict[str, list[str]] = {
                                                            "Image autoencoder (28×28 grayscale, e.g. MNIST)",
                                                            "Conv autoencoder (28×28 grayscale)"],
 }
-LEARNING_STYLES = {"supervised": MODEL_TYPES, "unsupervised": UNSUPERVISED_TYPES}
+# Agents that learn from rewards in a built-in environment (see rl.py).
+REINFORCEMENT_TYPES: dict[str, list[str]] = {
+    "🧭 GridWorld: reach the goal, avoid the traps": ["GridWorld agent (DQN)"],
+    "🎢 CartPole: balance a pole on a cart": ["CartPole agent (DQN)"],
+}
+LEARNING_STYLES = {"supervised": MODEL_TYPES, "unsupervised": UNSUPERVISED_TYPES,
+                   "reinforcement": REINFORCEMENT_TYPES}
 
 
 def from_template(template: str, name: str) -> ModelSpec:
@@ -581,7 +621,7 @@ def from_template(template: str, name: str) -> ModelSpec:
     return ModelSpec(name=name, input_shape=list(t["input_shape"]),
                      input_dtype=t.get("input_dtype", "float"),
                      task=t.get("task", "classification"), layers=t["layers"](),
-                     data={"tokenizer": t["tokenizer"]} if "tokenizer" in t else {})
+                     data=copy.deepcopy({k: t[k] for k in ("tokenizer", "env") if k in t}))
 
 
 # ---------------------------------------------------------------------------

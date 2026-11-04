@@ -412,6 +412,11 @@ def _shape(s) -> str:
 
 def describe_input(spec: ModelSpec) -> str:
     s = spec.input_shape
+    if spec.task == "reinforcement":
+        env = (spec.data.get("preprocess") or spec.data.get("env") or {}).get("env")
+        what = {"gridworld": " (where it is, where the goal and the traps are)",
+                "cartpole": " (cart position and speed, pole angle and spin)"}.get(env, "")
+        return f"**{s[0]} numbers**: what the agent observes{what}"
     if spec.input_dtype == "long":
         return f"a sequence of **{s[0]} token ids** (words turned into numbers)"
     if len(s) == 1:
@@ -425,6 +430,11 @@ def describe_input(spec: ModelSpec) -> str:
 
 
 def describe_task(spec: ModelSpec, out) -> str:
+    if spec.task == "reinforcement":
+        acts = f" ({', '.join(spec.class_names)})" if spec.class_names else ""
+        n = out[0] if out else "?"
+        return (f"**scores each of its {n} possible actions**{acts}: an agent that picks the action it "
+                "expects to bring the most reward (reinforcement learning)")
     if spec.task == "clustering":
         k = spec.layers[0].config["k"] if spec.layers else "?"
         return f"**puts it in one of {k} groups** it finds by itself (k-means clustering, no labels needed)"
@@ -470,6 +480,9 @@ def role(info: LayerInfo, spec: ModelSpec) -> str:
                 "decoder must rebuild the input from")
     if last and spec.task == "autoencoder":
         return f"outputs the rebuilt input, {_shape(o)} - the same shape as what went in"
+    if last and spec.task == "reinforcement" and t == "Linear":
+        return (f"turns {i[-1]} features into **one score per action** ({o[-1]} scores): the reward the "
+                "agent expects if it takes that action now")
     if t == "Linear":
         if last and spec.task == "language_model":
             return (f"turns each position's {i[-1]} features into **a score for every one of the "
@@ -552,6 +565,9 @@ def review(spec: ModelSpec) -> list[str]:
                          "the answer and writes nonsense afterwards. "
                          + ("Turn **causal** on." if l.type == "TransformerEncoder" else
                             "Turn **bidirectional** off."))
+    if spec.task == "reinforcement" and types and types[-1] != "Linear":
+        notes.append(f"⚠️ The agent ends with **{types[-1]}**. End with a Linear layer: action scores can "
+                     "be any number, including negative ones.")
     if spec.task in CLASSIC_TASKS:
         return [n for n in notes if not n.startswith("⚠️ **Layers")] or [
             "✅ A classic algorithm: nothing to tune but its one setting. Training fits it in seconds."]
@@ -687,7 +703,17 @@ def model_markdown(spec: ModelSpec) -> str:
             md.append(f"- **Layer {i.index + 1} {i.spec.type}**: {i.params:,} ({i.params / total:.0%}) `{bar}`")
 
     md += ["", "## How it learns"]
-    if spec.task == "clustering":
+    if spec.task == "reinforcement":
+        md += ["**No examples with answers: the agent learns from rewards.** It plays episodes in its "
+               "environment. At each step it looks at the state, picks an action, and gets a reward "
+               "(positive for good outcomes, negative for bad ones).", "",
+               "This model is a **Deep Q-Network (DQN)**: it scores every action with the total reward it "
+               "expects from there on. After each step it learns from a random batch of remembered steps: "
+               "the score of an action should become *the reward it got + γ × the best score of the next "
+               "state*. Early on it often picks a **random** action to explore; that chance shrinks as it "
+               "learns.", "",
+               "When you **use** it, the agent simply takes the action with the highest score."]
+    elif spec.task == "clustering":
         md += ["**No labels needed.** k-means starts with k centre points spread over the data, then "
                "repeats two steps: every example joins its nearest centre, and every centre moves to the "
                "middle of its examples. It stops when no example changes group. Nothing is trained with "
@@ -774,6 +800,9 @@ def training_settings_markdown(spec: ModelSpec, values: dict, n_train: int | Non
     opt, sched, device = values.get("optimizer"), values.get("scheduler"), values.get("device")
     if spec.task in CLASSIC_TASKS:
         return _classic_settings_markdown(spec, epochs, val_split)
+    if spec.task == "reinforcement":
+        return _agent_settings_markdown(epochs, batch, lr, _num(values.get("gamma")), _num(values.get("explore")),
+                                        patience)
     total = sum(i.params for i in spec.analyze())
     md = ["# Your training settings", "",
           "Training repeats one simple loop: take a **batch** of examples, let the model guess, "
@@ -870,6 +899,33 @@ def training_settings_markdown(spec: ModelSpec, values: dict, n_train: int | Non
     return "\n".join(md)
 
 
+def _agent_settings_markdown(episodes, batch, lr, gamma, explore, patience) -> str:
+    md = ["# Your training settings", "",
+          "The agent learns by playing **episodes**: one attempt from the start until it succeeds, fails "
+          "or runs out of steps. After every step it learns a little from a random batch of its memories.", ""]
+    md += ["## Episodes" + (f" = {episodes}" if episodes else ""),
+           "How many attempts it gets. Small worlds need a few hundred; harder ones need more. Every "
+           "10 episodes AIForge tests the agent without exploring and **keeps the best tested version**.", ""]
+    md += ["## Learning rate" + (f" = {lr:g}" if lr else ""),
+           "How big each correction is. RL is jumpy: if the reward rises and then collapses, lower it "
+           "(e.g. 0.0005).", ""]
+    md += ["## Batch size" + (f" = {batch}" if batch else ""),
+           "How many remembered steps it learns from at a time. 32–128 works well.", ""]
+    md += ["## Discount γ" + (f" = {gamma:g}" if gamma is not None else ""),
+           "How much rewards later on count compared with a reward now (0–1). 0.99 = plans far ahead "
+           "(right for CartPole, where surviving longer is the goal); 0.9–0.95 suits short tasks like a "
+           "small grid.", ""]
+    md += ["## Explore for" + (f" = {explore:.0%} of the episodes" if explore is not None else ""),
+           "At first the agent picks **random** actions to discover what happens; the chance falls from "
+           "100% to 5% over this share of the run. Too short and it settles on a poor habit; too long and "
+           "it wastes episodes.", ""]
+    md += [f"## Early stop = {patience}" if patience else "## Early stop = off",
+           f"Stop when the tested reward hasn't improved in {patience} tests ({patience * 10} episodes)."
+           if patience else "Off - all episodes run.", ""]
+    md += ["## Where it runs", "On the CPU: these small networks learn faster there than on a GPU."]
+    return "\n".join(md)
+
+
 def _classic_settings_markdown(spec: ModelSpec, rounds: int | None, val_split: float | None) -> str:
     md = ["# Your training settings", "",
           f"**{CLASSIC_TASKS[spec.task]}** is a classic algorithm: it is *fitted* to the data in one go, "
@@ -901,6 +957,8 @@ def diagnose(train_loss: list[float], val_loss: list[float], val_metric: list[fl
     """Plain-language reading of the loss/metric curves so far."""
     import math
 
+    if task == "reinforcement":
+        return _agent_diagnosis(train_loss, val_loss)
     if task in CLASSIC_TASKS:
         if not train_loss:
             return ["⏳ Start training - fitting takes a few seconds."]
@@ -975,7 +1033,38 @@ def diagnose(train_loss: list[float], val_loss: list[float], val_metric: list[fl
     return notes
 
 
+def _agent_diagnosis(rewards: list[float], average: list[float]) -> list[str]:
+    """Reading of the reward curve: ``average`` is the moving average of the last 20 episodes."""
+    n = len(rewards)
+    if n < 20:
+        return ["⏳ The agent is still exploring (mostly random actions) - trends show after 20+ episodes."]
+    k = max(5, n // 10)
+    start, now, peak = sum(average[:k]) / k, average[-1], max(average)
+    span = max(abs(peak - min(average)), 1e-9)
+    if now >= peak - 0.1 * span and now > start + 0.1 * span:
+        return ["✅ **Learning:** the average reward is rising. Each test keeps the best version so far."]
+    if peak - now > 0.3 * span and now < peak:
+        return ["⚠️ **The reward rose and fell back.** RL agents can un-learn a good habit. AIForge keeps the "
+                "best tested version; a lower learning rate makes this rarer."]
+    return ["⚠️ **The reward isn't rising yet.** Give it more episodes, explore for longer, or try another "
+            "learning rate."]
+
+
 def charts_markdown(train_loss, val_loss, val_metric, task: str, n_classes: int) -> str:
+    if task == "reinforcement":
+        md = ["# Reading the charts", "", "## Live diagnosis of this run"]
+        md += [f"- {n}" for n in _agent_diagnosis(train_loss, val_loss)]
+        md += ["", "## The two charts",
+               "**Reward per episode** (left): the thin line is each episode, the other one the average of "
+               "the last 20. Early episodes are noisy because the agent explores on purpose.", "",
+               "The **right chart** shows the task's own score over the last 20 episodes: how often it "
+               "reached the goal (GridWorld) or how many steps the pole stayed up (CartPole).", "",
+               "## Common patterns", "| You see | It means | Try |", "|---|---|---|",
+               "| reward climbs, then levels off | 👍 learned the task | nothing - it's working |",
+               "| flat and low for a long time | still exploring, or stuck | more episodes, explore longer |",
+               "| rises, then collapses | un-learned a good habit | lower learning rate (best version is kept) |",
+               "| very jumpy | normal in RL | look at the average line, not single episodes |"]
+        return "\n".join(md)
     md = ["# Reading the charts", "", "## Live diagnosis of this run"]
     md += [f"- {n}" for n in diagnose(train_loss, val_loss, val_metric, task, n_classes)]
     md += ["", "## The two charts",

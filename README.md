@@ -28,7 +28,8 @@ With the mouse or keyboard you can:
 4. **Evaluate** how good it really is
 5. **Use** it to make predictions, or let a tiny GPT **write text**
 6. **Find structure without labels**: groups (k-means), a 2-D map (PCA) and oddities (autoencoders)
-7. **Export** it for Python, ONNX Runtime, mobile apps and more
+7. **Train an agent** that learns from rewards (reinforcement learning), then watch it play
+8. **Export** it for Python, ONNX Runtime, mobile apps and more
 
 No PyTorch or Python knowledge needed. The built-in **Guide** (`g`) teaches the ML basics.
 
@@ -352,9 +353,36 @@ no answers: they find structure in your data by themselves.
 
 New to this? Press `g` → **3. Supervised, unsup., RL** and **🔍 Unsupervised**.
 
-Not available yet: reinforcement learning (shown in the dialog as *coming soon*) and the
-*Training script* export for unsupervised models. k-means and PCA aren't fine-tuned: training them
-again on new data takes seconds.
+Not available yet: the *Training script* export for unsupervised models. k-means and PCA aren't
+fine-tuned: training them again on new data takes seconds.
+
+### No data at all? Reinforcement learning (agents)
+
+Choose **🎮 Reinforcement** when you create a model. An **agent** learns by trial and error in a
+built-in world: it tries actions, gets rewards, and learns which actions pay off. No dataset needed.
+
+| World | The agent sees | It can | Rewards |
+|---|---|---|---|
+| 🧭 **GridWorld** (3×3 to 12×12, with traps) | where it is, the goal and the traps | step ↑ ↓ ← → | +10 goal · −5 trap · −0.1 per step |
+| 🎢 **CartPole** | cart position and speed, pole angle and spin | push left / right | +1 per step the pole stays up |
+
+- **Train:** press **Set up environment** (the preview shows the world and the model's input and
+  output size), then **▶ Start**. The model is a **Deep Q-Network (DQN)**: it scores every action and
+  learns from its own memories. Settings: **Episodes** (attempts), **Discount γ** (how much later
+  rewards count) and **Explore for** (share of the run spent trying random actions). The charts show
+  the reward per episode and how often it succeeds. Every 10 episodes the agent is tested without
+  exploring, and the **best tested version is kept**. Agents train on the CPU (faster for small networks).
+  On a laptop, GridWorld takes a few seconds and CartPole about a minute.
+- **Use:** **▶ Play** / **⏭ Step** to watch the agent act, with its score for every action. Press the
+  arrow keys to **play yourself** and compare.
+- **Evaluate:** 100 test episodes against an agent that moves at random on the same episodes:
+  average reward, success rate, how episodes ended, which actions it uses, and the best and worst
+  episode drawn.
+
+**First agent? Take the agent tour:** press `Ctrl+P` → **Take the agent tour** (it is also offered
+the first time you open an untrained agent's Train screen). A coach bar walks you through it in 6
+steps, highlighting each button: create the agent → see its world → train → watch it play → test it.
+It moves on by itself as you do each step. Or read `g` → **🎮 Reinforcement**.
 
 ---
 
@@ -442,6 +470,8 @@ aiforge predict spiral "0.1, 0.45"                  # or: -f table.csv -o predic
 aiforge evaluate spiral                             # metrics + a saved report
 aiforge export spiral -F onnx,bundle                # or: -F all
 aiforge serve spiral                                # web API + demo page (see section 11)
+aiforge new walker -t gridworld && aiforge train walker -e 300   # an agent learns from rewards
+aiforge play walker                                 # watch it play an episode (--steps: every step)
 aiforge list
 ```
 

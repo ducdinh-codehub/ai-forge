@@ -47,7 +47,8 @@ def add_commands(parser: argparse.ArgumentParser, common: argparse.ArgumentParse
     d.add_argument("-d", "--data",
                    help="A toy set (moons, spirals, circles, blobs, regression), a built-in dataset "
                         "(mnist, fashion_mnist, cifar10, cifar100), a Hugging Face dataset (hf:imdb), "
-                        "a table (.csv, .xlsx, .parquet), a .txt file or an image folder. "
+                        "a table (.csv, .xlsx, .parquet), a .txt file or an image folder. For an agent: "
+                        "an environment (gridworld, cartpole). "
                         "Leave it out to reuse the data the model was last trained on.")
     d.add_argument("--source", help="Override the guessed data type: csv, csv_text, text_corpus, "
                                     "image_folder, image_csv")
@@ -58,8 +59,16 @@ def add_commands(parser: argparse.ArgumentParser, common: argparse.ArgumentParse
     d.add_argument("--tokenizer", choices=["char", "word"], help="How a language model splits text")
     d.add_argument("--val-split", type=float, help="Share of data kept for validation (default 0.2)")
     d.add_argument("--max-samples", type=int, default=0, help="Train on at most this many samples (0 = all)")
+    r = p.add_argument_group("reinforcement learning (agents)")
+    r.add_argument("--env-size", type=int, help="GridWorld: cells per side (3-12, default 5)")
+    r.add_argument("--traps", type=int, help="GridWorld: number of traps (default 3)")
+    r.add_argument("--layout", choices=["fixed", "random"], help="GridWorld: the same map every episode, or a new one")
+    r.add_argument("--max-steps", type=int, help="Steps before an episode ends anyway")
+    r.add_argument("--gamma", type=float, default=0.99, help="Discount: how much later rewards count (default 0.99)")
+    r.add_argument("--explore", type=float, default=0.5,
+                   help="Share of the episodes spent exploring with random actions (default 0.5)")
     t = p.add_argument_group("training")
-    t.add_argument("-e", "--epochs", type=int, default=10)
+    t.add_argument("-e", "--epochs", type=int, default=10, help="Epochs (for an agent: episodes)")
     t.add_argument("-b", "--batch-size", type=int, default=64)
     t.add_argument("--lr", type=float, default=1e-3, help="Learning rate (default 0.001)")
     t.add_argument("--optimizer", choices=["Adam", "AdamW", "SGD"], default="Adam")
@@ -110,6 +119,12 @@ def add_commands(parser: argparse.ArgumentParser, common: argparse.ArgumentParse
     p.add_argument("--text-column", help="CSV column holding the text")
     p.add_argument("--compare", metavar="MODEL", help="Test whether another model is significantly better")
     p.add_argument("--no-robustness", action="store_true", help="Skip the noise test (faster)")
+    p.add_argument("--episodes", type=int, default=100, help="Agents: test episodes to play (default 100)")
+
+    p = sub.add_parser("play", parents=[common], help="Watch a trained agent play an episode")
+    p.add_argument("model")
+    p.add_argument("-n", "--episodes", type=int, default=1, help="How many episodes (default 1)")
+    p.add_argument("--steps", action="store_true", help="Draw every step, not only the end")
 
     p = sub.add_parser("export", parents=[common], help="Export a model for other tools")
     p.add_argument("model")
@@ -225,7 +240,17 @@ def cmd_new(ws, args) -> None:
 # -- train ---------------------------------------------------------------------------------
 
 
+def _episode_line(r: dict) -> str:
+    parts = [f"episode {r['epoch']:>4}", f"reward {r['reward']:>7.3g}", f"avg {r['avg_reward']:>7.3g}",
+             f"explore {r['epsilon']:.0%}"]
+    if "val_reward" in r:
+        parts.append(f"│ tested reward [b]{r['val_reward']:.3g}[/b]" + ("  ★ best so far" if r.get("best") else ""))
+    return "  ".join(parts)
+
+
 def _epoch_line(r: dict) -> str:
+    if "reward" in r:
+        return _episode_line(r)
     rounds = "moved" in r  # k-means: fitted in rounds, its loss is the spread within groups
     parts = [f"{'round' if rounds else 'epoch'} {r['epoch']:>3}", f"{'spread' if rounds else 'loss'} {r['train_loss']:.4f}"]
     if "train_acc" in r:
@@ -257,11 +282,12 @@ def cmd_train(ws, args) -> int:
     spec = ws.load_spec(args.model)
     opts = dict(source=args.source, target=args.target, text_column=args.text_column,
                 image_column=args.image_column, split=args.split, tokenizer=args.tokenizer,
-                val_split=args.val_split)
+                val_split=args.val_split, size=args.env_size, traps=args.traps, layout=args.layout,
+                max_steps=args.max_steps)
     cfg = TrainConfig(epochs=args.epochs, batch_size=args.batch_size, lr=args.lr, optimizer=args.optimizer,
                       weight_decay=args.weight_decay, scheduler=args.scheduler, early_stop=args.early_stop,
                       device=args.device, max_samples=args.max_samples, precision=args.precision,
-                      workers=args.workers)
+                      workers=args.workers, gamma=args.gamma, explore=args.explore)
     ck = pipeline.interrupted_run(ws, args.model)
     if ck and args.resume:
         if problem := pipeline.resume_problem(ws, args.model, ck):
@@ -278,6 +304,8 @@ def cmd_train(ws, args) -> int:
         data_cfg = pipeline.data_cfg_from_arg(args.data, spec, **opts)
     elif spec.data.get("dataset_cfg"):
         data_cfg = {**spec.data["dataset_cfg"], **{k: v for k, v in opts.items() if v is not None}}
+    elif spec.data.get("env"):  # a new agent: the environment its template was made for
+        data_cfg = {"source": "env", **spec.data["env"], **{k: v for k, v in opts.items() if v is not None}}
     else:
         raise CLIError(f"'{args.model}' hasn't been trained before - say which data with --data")
     if ck and not args.resume:
@@ -289,8 +317,9 @@ def cmd_train(ws, args) -> int:
         data = pipeline.load_data(ws, spec, data_cfg, cfg.max_samples)
     info = data.info
     out.print(f"[green]✓[/] {info.description}\n"
-              f"  input {tuple(info.input_shape)} {info.input_dtype} · {info.task} · "
-              f"{len(data.train):,} train / {len(data.val):,} validation samples")
+              f"  input {tuple(info.input_shape)} {info.input_dtype} · {info.task} · " +
+              (f"actions: {', '.join(info.class_names)}" if info.task == "reinforcement" else
+               f"{len(data.train):,} train / {len(data.val):,} validation samples"))
 
     progress = Progress(TextColumn("  epoch {task.fields[epoch]}/{task.total}"), BarColumn(),
                         TextColumn("loss {task.fields[loss]:.4f}"), TimeRemainingColumn(),
@@ -301,6 +330,8 @@ def cmd_train(ws, args) -> int:
         progress.update(bar, completed=epoch - 1 + step / steps, epoch=epoch, loss=loss)
 
     def on_epoch(r):
+        if not r.get("log", True):  # agents: only every 10th episode, when they are tested
+            return
         progress.console.print(_epoch_line(r))
         if r.get("sample"):
             from rich.markup import escape
@@ -339,6 +370,11 @@ def cmd_train(ws, args) -> int:
     if not run["epochs"]:
         out.print("[yellow]No epoch finished - nothing saved.[/]")
         return 1
+    if spec.task == "reinforcement":
+        out.print(f"[green]✓[/] Saved [b]{spec.name}[/b] (best tested reward {run['best_score']:.3g}, "
+                  f"{len(run['epochs'])} episodes) in {run['duration_s']}s. "
+                  f"Watch it: aiforge play {spec.name}")
+        return 0
     last = min(run["epochs"], key=lambda r: r.get("val_loss", r["train_loss"]))
     best = (f", val acc {last['val_acc']:.1%}" if "val_acc" in last else
             f", val MAE {last['val_mae']:.4g}" if "val_mae" in last else
@@ -366,6 +402,10 @@ def cmd_predict(ws, args) -> None:
     if args.file:
         path, n = predict_batch(spec, model, args.file, args.out)
         out.print(f"[green]✓[/] Wrote {n:,} predictions to {path}")
+        return
+    if spec.task == "reinforcement":
+        for i, (action, q) in enumerate(predict_one(spec, model, args.input, top_k=args.top_k)):
+            out.print(f"[b]→ {action}[/b]  (score {q:.4g})" if i == 0 else f"  [dim]{action}: score {q:.4g}[/]")
         return
     if is_unsupervised(spec.task):
         from .predict import describe
@@ -470,6 +510,8 @@ def cmd_evaluate(ws, args) -> None:
     other = None
     if args.compare:
         _need_weights(ws, args.compare)
+    if ws.load_spec(args.model).task == "reinforcement":
+        return _evaluate_agent(ws, args)
     with out.status("Evaluating…") as status:
         spec, model, _ = ws.load_model(args.model)
         ds, ref, desc, orig = ev.load_eval_data(spec, ws.data_dir, "file" if args.file else "val",
@@ -510,6 +552,54 @@ def cmd_evaluate(ws, args) -> None:
         out.print(f"\nvs {c['other']}: {_fmt(c['score_a'])} vs {_fmt(c['score_b'])} "
                   f"({c['test']}, p = {c['p_value']:.4f}, {verdict})")
     out.print(f"\nFull report: {path}")
+
+
+def _evaluate_agent(ws, args) -> None:
+    from . import evaluate as ev
+
+    spec, model, _ = ws.load_model(args.model)
+    with out.status("Playing test episodes…") as status:
+        rep = ev.evaluate_agent(spec, model, args.episodes, ws.load_history(args.model),
+                                progress=lambda stage, d, t: status.update(f"{stage}… {d}/{t}"))
+    ev.remember(rep, ws.model_dir(args.model))
+    path = ev.save_report(rep, ws.export_dir)
+    m, b = rep["metrics"], rep["baseline"]
+    out.print(f"[b]{rep['model']}[/b]: {rep['data']}\n\n{rep['verdict']}\n")
+    table = Table(box=None, header_style="bold")
+    for col in ("Metric", "Agent", "Random agent"):
+        table.add_column(col, justify="left" if col == "Metric" else "right")
+    table.add_row("Average reward", f"{m['reward']:.4g}", f"{b['reward']:.4g}")
+    table.add_row("Success", _fmt(m["success"], True), _fmt(b["success"], True))
+    table.add_row("Average steps", f"{m['steps']:.1f}", f"{b['steps']:.1f}")
+    out.print(table)
+    for w in rep["warnings"]:
+        out.print(f"[yellow]⚠ {w}[/]")
+    out.print(f"\nFull report: {path}")
+
+
+def cmd_play(ws, args) -> None:
+    from . import rl
+
+    _need_weights(ws, args.model)
+    spec, model, _ = ws.load_model(args.model)
+    if spec.task != "reinforcement":
+        raise CLIError(f"'{args.model}' is a {spec.task} model - 'play' is for agents")
+    env = rl.make_env(spec.data.get("preprocess") or spec.data.get("env") or {})
+    for n in range(1, args.episodes + 1):
+        obs, total, steps = env.reset(), 0.0, 0
+        while True:
+            q = rl.q_values(model, obs)
+            a = int(q.argmax())
+            s = env.step(a)
+            obs, total, steps = s.obs, total + s.reward, steps + 1
+            if args.steps:
+                out.print(f"step {steps}: {env.actions[a]} {env.arrows[a]}  reward {s.reward:+.3g}")
+                out.print(env.render(), highlight=False)
+            if s.done:
+                break
+        if not args.steps:
+            out.print(env.render(path=True), highlight=False)
+        out.print(f"[b]Episode {n}:[/b] {s.event} · reward {total:.3g} in {steps} step{'s' if steps != 1 else ''}\n")
 
 
 # -- serve ---------------------------------------------------------------------------------

@@ -31,6 +31,10 @@ def data_cfg_from_arg(value: str, spec: ModelSpec, **opts) -> dict:
         return {"source": "hf", "name": name, **({"subset": subset} if subset else {}), **opts}
     if source is None:
         key = value.strip().lower()
+        from .rl import ENVS
+
+        if key in ENVS:
+            return {"source": "env", "env": key, **opts}
         if key in datamod.SYNTHETIC:
             return {"source": "synthetic", "kind": key, **opts}
         if key in datamod.TORCHVISION:

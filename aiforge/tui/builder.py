@@ -15,8 +15,8 @@ from textual.widgets.option_list import Option
 
 from ..guide import layer_card_markdown, model_card_markdown
 from ..layers import REGISTRY, by_category, coerce
-from ..spec import (SUPERVISED_TASKS, TASK_LABELS, UNSUPERVISED_TASKS, LayerSpec, ModelSpec, is_unsupervised,
-                    remap_state, safe_name, style_badge)
+from ..spec import (STYLE_TASKS, TASK_LABELS, LayerSpec, ModelSpec, is_reinforcement, is_unsupervised,
+                    learning_style, remap_state, safe_name, style_badge)
 from .modals import SaveChangesDialog
 
 BAR = 8
@@ -285,12 +285,12 @@ class BuilderScreen(Screen):
             Select([("float - numbers / images", "float"), ("long - token ids (text)", "long")],
                    value=s.input_dtype, allow_blank=False, id="m-dtype"),
             # The learning style is chosen when the model is created; only tasks of that style here.
-            Label(f"Task  [dim]{style_badge(s.task)} {'unsupervised' if is_unsupervised(s.task) else 'supervised'}[/]"),
-            Select([(TASK_LABELS[t], t) for t in
-                    (UNSUPERVISED_TASKS if is_unsupervised(s.task) else SUPERVISED_TASKS)],
+            Label(f"Task  [dim]{style_badge(s.task)} {learning_style(s.task)}[/]"),
+            Select([(TASK_LABELS[t], t) for t in STYLE_TASKS[learning_style(s.task)]],
                    value=s.task, allow_blank=False, id="m-task"),
-            Label("Class names  [dim]comma-separated, optional[/]" if not is_unsupervised(s.task) else
-                  "Labels kept aside  [dim]to check the groups, optional[/]"),
+            Label("Labels kept aside  [dim]to check the groups, optional[/]" if is_unsupervised(s.task) else
+                  "Actions  [dim]set by the environment when training[/]" if is_reinforcement(s.task) else
+                  "Class names  [dim]comma-separated, optional[/]"),
             Input(", ".join(s.class_names), id="m-classes"),
             Static("", id="prop-error", classes="error"),
         ]

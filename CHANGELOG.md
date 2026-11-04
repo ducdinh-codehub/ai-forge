@@ -6,6 +6,24 @@ and versions follow [Semantic Versioning](https://semver.org/) (still `0.x`: any
 ## [Unreleased]
 
 ### Added
+- **Reinforcement learning: agents that learn from rewards.** Choose 🎮 Reinforcement in the *New
+  model* dialog. No dataset needed: the agent learns by trial and error in a built-in world.
+  - Two worlds: **GridWorld** (reach the goal, avoid the traps; size, traps and a fixed or random
+    map are settings) and **CartPole** (balance a pole on a cart, Gym's classic physics).
+  - **Deep Q-Network (DQN)** training with a replay memory, a target network and fading exploration.
+    The Train screen shows the world, *Episodes*, *Discount γ* and *Explore for*, charts the reward
+    per episode and the success rate, tests the agent every 10 episodes and keeps the best tested version.
+  - **Use:** watch the agent play step by step with its score for every action, or play yourself with
+    the arrow keys.
+  - **Evaluate:** test episodes against a random agent on the same episodes: average reward with a
+    confidence interval, success rate, how episodes ended, action use, best and worst episode drawn.
+  - Command line: `aiforge train <agent>` (`-d gridworld|cartpole`, `--env-size`, `--traps`,
+    `--layout`, `--gamma`, `--explore`), `aiforge play`, `aiforge evaluate --episodes`.
+  - **Agent tour**: a guided, 6-step walk through a first agent (create, see its world, train, watch
+    it play, test it), highlighting each button. `Ctrl+P` → *Take the agent tour*, and offered once on
+    an untrained agent's Train screen. It follows the agent's own world (GridWorld or CartPole).
+  - Guide lesson *🎮 Reinforcement: agents*; lesson 3 now points to it.
+- **Guided tours** scroll the highlighted button into view when it is below the fold.
 - **Unsupervised learning: models that need no labels.** The *New model* dialog now starts with
   the learning style: 🎯 Supervised, 🔍 Unsupervised (🎮 Reinforcement is shown as coming soon).
   - **k-means clustering** and **PCA**: classic algorithms, fitted in seconds on the CPU (new

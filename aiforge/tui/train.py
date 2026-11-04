@@ -14,7 +14,8 @@ from textual.widgets.option_list import Option
 
 from .. import data as datamod
 from ..pipeline import checkpoint_path, interrupted_run, resume_problem, stored_data_cfg
-from ..spec import CLASSIC_TASKS, ModelSpec, is_unsupervised, safe_name
+from ..spec import CLASSIC_TASKS, ModelSpec, is_reinforcement, is_unsupervised, safe_name
+from ..rl import ENV_LABELS
 from ..textgen import TOKENIZERS
 from .chart import LineChart
 from .resize import DEFAULT_FRACTION, MAX_FRACTION, MIN_FRACTION, ResizeHandle
@@ -35,7 +36,7 @@ class TrainScreen(Screen):
         super().__init__()
         self.model_name = name
         self.finetune = finetune
-        self.unsupervised = self.classic = False  # set from the model on mount
+        self.unsupervised = self.classic = self.rl = False  # set from the model on mount
         self.preset = preset
         self.hub_key = preset.get("hub") if preset else None
         self.spec = None  # working copy, set on mount
@@ -57,7 +58,7 @@ class TrainScreen(Screen):
         yield Header()
         with Horizontal(id="train-main"):
             with VerticalScroll(id="train-config"):
-                yield Static("① Data", classes="section-title")
+                yield Static("① Data", classes="section-title", id="data-title")
                 yield Select([(v, k) for k, v in datamod.SOURCES.items()], value="synthetic",
                              allow_blank=False, id="source")
                 yield Button("🗄 Get a famous dataset…", id="hub")
@@ -100,7 +101,24 @@ class TrainScreen(Screen):
                     yield Label("Split the text into")
                     yield Select([(v, k) for k, v in TOKENIZERS.items()], value="char", allow_blank=False,
                                  id="tokenizer")
-                with Horizontal(classes="row"):
+                with Vertical(id="grp-env", classes="group"):  # reinforcement learning: the agent's world
+                    yield Select([(v, k) for k, v in ENV_LABELS.items()], value="gridworld", allow_blank=False,
+                                 id="env")
+                    with Horizontal(classes="row", id="row-grid"):
+                        with Vertical():
+                            yield Label("Grid size")
+                            yield Input("5", id="env_size", type="integer")
+                        with Vertical():
+                            yield Label("Traps")
+                            yield Input("3", id="env_traps", type="integer")
+                    with Vertical(id="col-layout"):
+                        yield Label("Map")
+                        yield Select([("the same map every episode (easier)", "fixed"),
+                                      ("a new map every episode (harder)", "random")],
+                                     value="fixed", allow_blank=False, id="env_layout")
+                    yield Label("Max steps per episode  [dim](0 = default)[/]")
+                    yield Input("0", id="env_steps", type="integer")
+                with Horizontal(classes="row", id="row-split"):
                     with Vertical():
                         yield Label("Validation split")
                         yield Input("0.2", id="val_split", type="number")
@@ -117,6 +135,13 @@ class TrainScreen(Screen):
                     with Vertical(id="col-batch"):
                         yield Label("Batch size")
                         yield Input("64", id="batch_size", type="integer")
+                with Horizontal(classes="row", id="row-rl"):
+                    with Vertical():
+                        yield Label("Discount γ  [dim](future rewards)[/]")
+                        yield Input("0.99", id="gamma", type="number")
+                    with Vertical():
+                        yield Label("Explore for  [dim](share of episodes)[/]")
+                        yield Input("0.5", id="explore", type="number")
                 with Horizontal(classes="row", id="row-lr"):
                     with Vertical():
                         yield Label("Learning rate")
@@ -235,6 +260,10 @@ class TrainScreen(Screen):
         PCA) are fitted, not trained, so the gradient settings are hidden."""
         self.unsupervised = is_unsupervised(self.spec.task)
         self.classic = self.spec.task in CLASSIC_TASKS
+        self.rl = is_reinforcement(self.spec.task)
+        self.query_one("#grp-env").display = self.query_one("#row-rl").display = self.rl
+        if self.rl:
+            return self._setup_agent()
         if not self.unsupervised:
             return
         self.query_one("#source", Select).set_options(
@@ -251,6 +280,33 @@ class TrainScreen(Screen):
             self.query_one("#epochs-label", Label).update("Max rounds")
             self.query_one("#epochs", Input).value = "100"
             self.query_one("#sysmon", SystemPanel).cpu_only = "classic algorithms run on the CPU, in seconds"
+
+    def _setup_agent(self) -> None:
+        """An agent learns in an environment, not from a dataset: no data sources, no validation
+        split; episodes instead of epochs; discount and exploration instead of a schedule."""
+        for wid in ("#source", "#hub", "#row-split", "#row-opt", "#row-early", "#row-precision"):
+            self.query_one(wid).display = False
+        self.query_one("#data-title", Static).update("① Environment")
+        self.query_one("#load", Button).label = "Set up environment"
+        self.query_one("#epochs-label", Label).update("Episodes")
+        if not self.finetune:
+            self.query_one("#epochs", Input).value = "300"
+        self.query_one("#sysmon", SystemPanel).cpu_only = "small agents learn fastest on the CPU"
+        self.query_one("#data-info", Static).update("[dim]Set up the environment to begin.[/]")
+        loss_chart, metric_chart = self.query_one("#chart-loss", LineChart), self.query_one("#chart-metric", LineChart)
+        loss_chart.title, metric_chart.title = "Reward per episode", "Success"
+        loss_chart.unit = metric_chart.unit = "episode"
+        if not self.finetune:
+            from .tour import offer_agent_tour
+
+            self.call_after_refresh(offer_agent_tour, self)
+
+    @on(Select.Changed, "#env")
+    def _env_changed(self) -> None:
+        grid = self.query_one("#env", Select).value == "gridworld"
+        self.query_one("#row-grid").display = self.query_one("#col-layout").display = grid
+        # A small grid is a short task (0.95); balancing longer is CartPole's whole point (0.99).
+        self.query_one("#gamma", Input).value = "0.95" if grid else "0.99"
 
     # -- system monitor --------------------------------------------------------
 
@@ -272,6 +328,14 @@ class TrainScreen(Screen):
 
     def _apply_previous_dataset(self, prev: dict | None = None) -> None:
         prev = prev or self.spec.data.get("dataset_cfg")
+        if self.rl:
+            env = prev or {"source": "env", **self.spec.data.get("env", {})}
+            self.query_one("#env", Select).value = env.get("env", "gridworld")
+            for key, field in (("size", "env_size"), ("traps", "env_traps"), ("max_steps", "env_steps")):
+                if env.get(key) is not None:
+                    self.query_one(f"#{field}", Input).value = str(env[key])
+            self.query_one("#env_layout", Select).value = env.get("layout", "fixed")
+            return
         if not prev and self.spec.task == "language_model":
             # A new language model starts on the bundled sample text, ready to train.
             prev = {"source": "text_corpus", "path": str(datamod.EXAMPLE_CORPUS),
@@ -335,6 +399,10 @@ class TrainScreen(Screen):
         self._update_source_fields()
 
     def _update_source_fields(self) -> None:
+        if self.rl:  # only the environment's own settings
+            for g in ("path", "csv", "text", "image", "hf", "task", "synth", "corpus"):
+                self.query_one(f"#grp-{g}").display = False
+            return
         src = self.query_one("#source", Select).value
         self.query_one("#grp-path").display = src in datamod.FILE_SOURCES
         self.query_one("#grp-csv").display = src in ("csv", "csv_text", "image_csv")
@@ -403,6 +471,13 @@ class TrainScreen(Screen):
             return None if v in (Select.NULL, Select.BLANK, "auto") else v
         source = self.query_one("#source", Select).value
         text = lambda i: self.query_one(f"#{i}", Input).value.strip() or None  # noqa: E731
+        if self.rl:
+            env = self.query_one("#env", Select).value
+            cfg = {"source": "env", "env": env, "max_steps": int(text("env_steps") or 0) or None}
+            if env == "gridworld":
+                cfg.update(size=int(text("env_size") or 5), traps=int(text("env_traps") or 0),
+                           layout=self.query_one("#env_layout", Select).value)
+            return cfg
         if source == "hf":
             return {"source": "hf", "name": text("hf_name") or "", "subset": text("hf_subset"),
                     "split": text("hf_split"), "target": text("hf_target"),
@@ -428,7 +503,7 @@ class TrainScreen(Screen):
         except ValueError:
             self.notify("Validation split must be a number like 0.2", severity="error")
             return
-        if cfg["source"] in datamod.FILE_SOURCES and not cfg["path"]:
+        if cfg["source"] in datamod.FILE_SOURCES and not cfg.get("path"):
             self.notify("Enter a path first.", severity="error")
             return
         self.query_one("#data-info", Static).update("[yellow]Loading data…[/] "
@@ -464,6 +539,8 @@ class TrainScreen(Screen):
             classes = (f"labels kept aside to check the groups: {', '.join(info.class_names[:8])}"
                        f"{'…' if len(info.class_names) > 8 else ''}") if info.class_names else "no labels used"
         used = f" (using {len(self.train_ds):,})" if n else ""
+        if info.task == "reinforcement":
+            return self._environment_ready(info)
         self.query_one("#data-info", Static).update(
             f"[green]✓[/] {info.description}\n"
             f"   input {tuple(info.input_shape)} {info.input_dtype} · {info.task} · {classes}\n"
@@ -478,6 +555,21 @@ class TrainScreen(Screen):
                 "(1 MB) from 🗄 Get a famous dataset: a few epochs already write recognisable words.")
         if self.finetune and self.spec.class_names and info.class_names != self.spec.class_names:
             self.query_one("#reset_head", Switch).value = True
+        if self._resuming:
+            self._start_resumed()
+
+    def _environment_ready(self, info) -> None:
+        from rich.markup import escape
+
+        from .. import rl
+
+        env = rl.make_env(info.preprocess, seed=0)
+        acts = "  ".join(f"{a} {n}" for a, n in zip(env.arrows, env.actions))
+        self.query_one("#data-info", Static).update(
+            f"[green]✓[/] {escape(info.description)}\n{escape(env.render())}\n"
+            f"   Observes [b]{env.obs_size}[/b] numbers → model input ({env.obs_size},)\n"
+            f"   Actions: {acts} → model output {len(env.actions)}")
+        self._check_mismatch()
         if self._resuming:
             self._start_resumed()
 
@@ -658,6 +750,10 @@ class TrainScreen(Screen):
                           scheduler=s("scheduler"), early_stop=int(q("early_stop") or 0),
                           device=s("device"), max_samples=int(q("max_samples") or 0),
                           precision=s("precision"), workers=int(s("workers")))
+        if self.rl:
+            cfg.gamma, cfg.explore = float(q("gamma")), float(q("explore"))
+            if not (0 < cfg.gamma <= 1 and 0 < cfg.explore <= 1):
+                raise ValueError
         if cfg.epochs < 1 or cfg.batch_size < 1 or cfg.lr <= 0:
             raise ValueError
         return cfg
@@ -681,8 +777,8 @@ class TrainScreen(Screen):
         try:
             cfg = self._train_cfg()
         except ValueError:
-            self.notify("Check training settings: epochs/batch must be positive integers, lr > 0.",
-                        severity="error")
+            self.notify("Check training settings: epochs/batch must be positive integers, lr > 0"
+                        + (", discount and explore between 0 and 1." if self.rl else "."), severity="error")
             return
         save_as = self.model_name
         if self.finetune:
@@ -729,7 +825,16 @@ class TrainScreen(Screen):
             "clustering": "Spread within groups", "pca": "Rebuild error",
             "autoencoder": "Rebuild error"}.get(self.spec.task, "Loss")
         for c in (chart, self.query_one("#chart-loss", LineChart)):
-            c.unit = "round" if self.classic else "epoch"
+            c.unit = "round" if self.classic else "episode" if self.rl else "epoch"
+        if self.rl:
+            from .. import rl
+
+            env = rl.ENVS[self.info.preprocess["env"]]
+            chart.title, chart.fmt = f"{env.metric[0]} (last {rl.SMOOTH})", env.metric[1]
+            chart.labels = ("agent",)
+            loss_chart = self.query_one("#chart-loss", LineChart)
+            loss_chart.title, loss_chart.fmt = "Reward per episode", "{:.3g}"
+            loss_chart.labels = ("episode", f"average of {rl.SMOOTH}")
         self.query_one("#chart-loss", LineChart).set_data([], [])
         chart.set_data([], [])
         self.query_one("#start", Button).disabled = True
@@ -750,6 +855,11 @@ class TrainScreen(Screen):
         self._run(save_as, model, resume)
 
     def _on_batch(self, epoch, step, steps, loss, epochs) -> None:
+        if self.rl:  # step = steps into the episode, loss = reward so far
+            self.query_one("#progress", ProgressBar).update(progress=epoch - 1)
+            self.query_one("#epoch-label", Static).update(
+                f"  episode {epoch}/{epochs} · step {step} · reward so far {loss:.3g}")
+            return
         self.query_one("#sysmon", SystemPanel).training_progress(
             ((epoch - 1) * steps + step) * self._batch_size, self._device)
         self.query_one("#progress", ProgressBar).update(progress=epoch - 1 + step / steps)
@@ -757,7 +867,29 @@ class TrainScreen(Screen):
             f"  round {epoch} (stops by itself, at most {epochs}) · spread {loss:.4f}" if self.classic else
             f"  epoch {epoch}/{epochs} · batch {step}/{steps} · loss {loss:.4f}")
 
+    def _on_episode(self, r: dict) -> None:
+        """Charts every episode; a log line only when the agent is tested (every 10 episodes)."""
+        from rich.markup import escape
+
+        self.loss_hist.append(r["reward"])
+        self.val_hist.append(r["avg_reward"])
+        self.metric_hist.append(r["metric"])
+        self.query_one("#chart-loss", LineChart).set_data(self.loss_hist, self.val_hist)
+        self.query_one("#chart-metric", LineChart).set_data(self.metric_hist)
+        self.query_one("#progress", ProgressBar).update(progress=r["epoch"])
+        self._refresh_drawer("charts")
+        if not r.get("log"):
+            return
+        log = self.query_one("#log", RichLog)
+        log.write(f"episode {r['epoch']:>4}  reward {r['reward']:.3g}  avg {r['avg_reward']:.3g}  "
+                  f"explore {r['epsilon']:.0%}  │ tested reward [b]{r['val_reward']:.3g}[/b]"
+                  + ("  [green]★ best so far[/]" if r.get("best") else ""))
+        if r.get("frame") and self.info.preprocess.get("env") == "gridworld":
+            log.write(escape(r["frame"]))
+
     def _on_epoch(self, r: dict) -> None:
+        if "reward" in r:
+            return self._on_episode(r)
         self.loss_hist.append(r["train_loss"])
         parts = [f"{'round' if self.classic else 'epoch'} {r['epoch']:>3}",
                  f"{'spread' if self.spec.task == 'clustering' else 'loss'} {r['train_loss']:.4f}"]
@@ -853,11 +985,16 @@ class TrainScreen(Screen):
                   f", val perplexity {last['val_ppl']:.2f}" if "val_ppl" in last else
                   f", variation kept {last['val_kept']:.1%}" if last.get("val_kept") is not None else
                   f", silhouette {last['val_silhouette']:.3f}" if last.get("val_silhouette") is not None else "")
-        steps = "fitted in one step" if self.spec.task == "pca" else \
+        if self.rl:
+            metric = f", best tested reward {run['best_score']:.3g}" if run.get("best_score") is not None else ""
+        steps = f"{len(run['epochs'])} episodes" if self.rl else "fitted in one step" if self.spec.task == "pca" else \
             f"{len(run['epochs'])} round{'s' if len(run['epochs']) != 1 else ''}" if self.classic else \
             f"best weights, {len(run['epochs'])} epochs"
         msg = f"Saved '{save_as}' ({steps}{metric})"
         log.write(f"[green]✓ {msg}[/]")
+        if self.rl:
+            log.write("[cyan]Next:[/] press [b]Esc[/b], then [b]p[/b] (Use) and [b]▶ Play[/b] to watch the agent, "
+                      "or [b]v[/b] (Evaluate) to test it on 100 episodes.")
         if self.unsupervised:
             log.write("[cyan]Next:[/] press [b]Esc[/b], then [b]v[/b] (Evaluate) for a map of the data and its "
                       "most unusual examples, or [b]p[/b] (Use) to check new examples.")
@@ -977,7 +1114,7 @@ class TrainScreen(Screen):
 
     def _raw_settings(self) -> dict:
         vals = {i: self.query_one(f"#{i}", Input).value for i in
-                ("epochs", "batch_size", "lr", "weight_decay", "early_stop", "val_split")}
+                ("epochs", "batch_size", "lr", "weight_decay", "early_stop", "val_split", "gamma", "explore")}
         vals.update({i: str(self.query_one(f"#{i}", Select).value)
                      for i in ("optimizer", "scheduler", "device", "precision", "workers")})
         return vals
