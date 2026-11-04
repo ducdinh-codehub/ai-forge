@@ -5,6 +5,8 @@ and versions follow [Semantic Versioning](https://semver.org/) (still `0.x`: any
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-11-04
+
 ### Added
 - **One-line installer**, for people who don't code: one command in Terminal (macOS, Linux) or
   PowerShell (Windows) installs uv, a private Python and AIForge, and adds an AIForge icon that
@@ -168,7 +170,8 @@ and versions follow [Semantic Versioning](https://semver.org/) (still `0.x`: any
 - First release: design a network from a list of layers, train it, use it and export it, all
   in the terminal. Built-in Guide and resizable panels.
 
-[Unreleased]: https://github.com/ducdinh-codehub/ai-forge/compare/v0.2.3...HEAD
+[Unreleased]: https://github.com/ducdinh-codehub/ai-forge/compare/v0.2.4...HEAD
+[0.2.4]: https://github.com/ducdinh-codehub/ai-forge/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/ducdinh-codehub/ai-forge/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/ducdinh-codehub/ai-forge/compare/v0.2.0...v0.2.2
 [0.2.0]: https://github.com/ducdinh-codehub/ai-forge/compare/v0.1.9...v0.2.0
