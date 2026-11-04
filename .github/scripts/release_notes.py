@@ -17,7 +17,10 @@ def notes(version: str, text: str) -> str:
     if not m or not m.group(1).strip():
         raise SystemExit(f"CHANGELOG.md has no notes for {version}: add a '## [{version}] - date' section")
     return (f"{m.group(1).strip()}\n\n---\n"
-            f"**Install:** `pipx install aiforge-studio=={version}` · "
+            "**Install or update in one line** (no Python needed): macOS / Linux "
+            "`curl -LsSf https://raw.githubusercontent.com/ducdinh-codehub/ai-forge/main/install.sh | sh` · "
+            "Windows `irm https://raw.githubusercontent.com/ducdinh-codehub/ai-forge/main/install.ps1 | iex`\n\n"
+            f"**With pip:** `pipx install aiforge-studio=={version}` · "
             f"[PyPI](https://pypi.org/project/aiforge-studio/{version}/) · "
             "[Full changelog](https://github.com/ducdinh-codehub/ai-forge/blob/main/CHANGELOG.md)")
 
