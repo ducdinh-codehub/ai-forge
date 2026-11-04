@@ -5,6 +5,8 @@ and versions follow [Semantic Versioning](https://semver.org/) (still `0.x`: any
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-11-04
+
 ### Added
 - **Reinforcement learning: agents that learn from rewards.** Choose 🎮 Reinforcement in the *New
   model* dialog. No dataset needed: the agent learns by trial and error in a built-in world.
@@ -43,6 +45,9 @@ and versions follow [Semantic Versioning](https://semver.org/) (still `0.x`: any
 - **Guide:** new ML-basics lesson *3. Three ways to learn* explains supervised, unsupervised and
   reinforcement learning in plain words, with everyday examples and a "which one do I need?"
   checklist. The lessons after it are renumbered (4–8).
+
+### Changed
+- PyPI keywords for unsupervised and reinforcement learning, so the package is easier to find.
 
 ## [0.2.2] - 2026-11-03
 
@@ -156,7 +161,8 @@ and versions follow [Semantic Versioning](https://semver.org/) (still `0.x`: any
 - First release: design a network from a list of layers, train it, use it and export it, all
   in the terminal. Built-in Guide and resizable panels.
 
-[Unreleased]: https://github.com/ducdinh-codehub/ai-forge/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/ducdinh-codehub/ai-forge/compare/v0.2.3...HEAD
+[0.2.3]: https://github.com/ducdinh-codehub/ai-forge/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/ducdinh-codehub/ai-forge/compare/v0.2.0...v0.2.2
 [0.2.0]: https://github.com/ducdinh-codehub/ai-forge/compare/v0.1.9...v0.2.0
 [0.1.9]: https://github.com/ducdinh-codehub/ai-forge/compare/v0.1.8...v0.1.9
