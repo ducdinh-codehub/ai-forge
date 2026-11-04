@@ -285,7 +285,7 @@ $("form").onsubmit = async e => {
       const d = data.detail; show(`<div class="err">${esc(Array.isArray(d) ? d.map(x => x.msg).join("; ") : d)}</div>`);
     } else if (meta.kind === "prompt") {
       show(`<pre><b>${esc(data.prompt)}</b>${esc(data.text)}</pre>`);
-    } else if (meta.task === "regression") {
+    } else if (meta.task !== "classification") {
       show(data.predictions.map(p => `<div class="dim">${esc(p.label)}</div><div class="big">${
         Number(p.score.toPrecision(6))}</div>`).join(""));
     } else {

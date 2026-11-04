@@ -14,7 +14,7 @@ from textual.widgets.option_list import Option
 
 from .. import data as datamod
 from ..pipeline import checkpoint_path, interrupted_run, resume_problem, stored_data_cfg
-from ..spec import ModelSpec, safe_name
+from ..spec import CLASSIC_TASKS, ModelSpec, is_unsupervised, safe_name
 from ..textgen import TOKENIZERS
 from .chart import LineChart
 from .resize import DEFAULT_FRACTION, MAX_FRACTION, MIN_FRACTION, ResizeHandle
@@ -35,6 +35,7 @@ class TrainScreen(Screen):
         super().__init__()
         self.model_name = name
         self.finetune = finetune
+        self.unsupervised = self.classic = False  # set from the model on mount
         self.preset = preset
         self.hub_key = preset.get("hub") if preset else None
         self.spec = None  # working copy, set on mount
@@ -66,7 +67,7 @@ class TrainScreen(Screen):
                         yield Input(placeholder="~/data/table.csv", id="path")
                         yield Button("📂 Browse", id="browse-data")
                 with Vertical(id="grp-csv", classes="group"):
-                    yield Label("Target column  [dim](what to predict)[/]")
+                    yield Label("Target column  [dim](what to predict)[/]", id="target-label")
                     yield Select([], prompt="last column", id="target")
                 with Vertical(id="grp-text", classes="group"):
                     yield Label("Text column")
@@ -110,20 +111,20 @@ class TrainScreen(Screen):
 
                 yield Static("② Training settings", classes="section-title")
                 with Horizontal(classes="row"):
-                    with Vertical():
-                        yield Label("Epochs")
+                    with Vertical(id="col-epochs"):
+                        yield Label("Epochs", id="epochs-label")
                         yield Input("20" if not self.finetune else "10", id="epochs", type="integer")
-                    with Vertical():
+                    with Vertical(id="col-batch"):
                         yield Label("Batch size")
                         yield Input("64", id="batch_size", type="integer")
-                with Horizontal(classes="row"):
+                with Horizontal(classes="row", id="row-lr"):
                     with Vertical():
                         yield Label("Learning rate")
                         yield Input("0.001" if not self.finetune else "0.0005", id="lr", type="number")
                     with Vertical():
                         yield Label("Weight decay")
                         yield Input("0", id="weight_decay", type="number")
-                with Horizontal(classes="row"):
+                with Horizontal(classes="row", id="row-opt"):
                     with Vertical():
                         yield Label("Optimizer")
                         yield Select([(o, o) for o in ("Adam", "AdamW", "SGD")], value="Adam",
@@ -132,7 +133,7 @@ class TrainScreen(Screen):
                         yield Label("LR schedule")
                         yield Select([("constant", "none"), ("cosine", "cosine"), ("step ÷10", "step")],
                                      value="none", allow_blank=False, id="scheduler")
-                with Horizontal(classes="row"):
+                with Horizontal(classes="row", id="row-early"):
                     with Vertical():
                         yield Label("Early stop [dim](patience)[/]")
                         yield Input("0", id="early_stop", type="integer")
@@ -140,7 +141,7 @@ class TrainScreen(Screen):
                         yield Label("Device")
                         yield Select([(d, d) for d in available_devices()], value="auto",
                                      allow_blank=False, id="device")
-                with Horizontal(classes="row"):
+                with Horizontal(classes="row", id="row-precision"):
                     with Vertical():
                         yield Label("Precision")
                         yield Select([(v, k) for k, v in PRECISIONS.items()], value="auto",
@@ -150,7 +151,7 @@ class TrainScreen(Screen):
                         yield Select([("auto", "-1")] + [(str(n), str(n)) for n in (0, 1, 2, 4, 8)],
                                      value="-1", allow_blank=False, id="workers")
                 if not self.finetune:
-                    with Horizontal(classes="switch-row"):
+                    with Horizontal(classes="switch-row", id="row-resume"):
                         yield Switch(True, id="resume")
                         yield Label("Continue from saved weights (if any)")
                 else:
@@ -204,10 +205,12 @@ class TrainScreen(Screen):
         self.spec = self.ws.load_spec(self.model_name)
         mode = "Fine-tune" if self.finetune else "Train"
         weights = "trained weights" if self.ws.has_weights(self.model_name) else "no weights yet"
-        self.query_one("#model-line", Static).update(
-            f"{mode} [b]{self.model_name}[/b] · {self.spec.total_params():,} params · {weights}")
+        size = ("classic algorithm" if self.spec.task in CLASSIC_TASKS else
+                f"{self.spec.total_params():,} params")
+        self.query_one("#model-line", Static).update(f"{mode} [b]{self.model_name}[/b] · {size} · {weights}")
         self.query_one("#fit-row").display = False
         self.query_one("#guide-drawer").display = False
+        self._setup_learning_style()
         self._set_guide_width(self.ws.get_setting("guide_width", DEFAULT_FRACTION), save=False)
         self._monitor = None
         self._sample_system()
@@ -222,8 +225,32 @@ class TrainScreen(Screen):
         self._resuming: dict | None = None
         self._show_resume()
         self.query_one("#log", RichLog).write(
+            "[dim]Tip: k-means and PCA are fitted in seconds. Afterwards press v (Evaluate) for a map of "
+            "the data and its most unusual examples.[/]" if self.classic else
             "[dim]Tip: start with the defaults. If validation loss rises while train loss falls, the "
             "model is overfitting - add Dropout, lower epochs or use early stopping.[/]")
+
+    def _setup_learning_style(self) -> None:
+        """Unsupervised models need no labels and skip text sources; classic algorithms (k-means,
+        PCA) are fitted, not trained, so the gradient settings are hidden."""
+        self.unsupervised = is_unsupervised(self.spec.task)
+        self.classic = self.spec.task in CLASSIC_TASKS
+        if not self.unsupervised:
+            return
+        self.query_one("#source", Select).set_options(
+            [(v, k) for k, v in datamod.SOURCES.items() if k not in ("csv_text", "text_corpus")])
+        self.query_one("#source", Select).value = "synthetic"
+        self.query_one("#target-label", Label).update(
+            "Label column  [dim](optional: kept aside to check the groups, never learned from)[/]")
+        self.query_one("#target", Select).prompt = "none: learn from every column"
+        if self.classic:
+            for wid in ("#col-batch", "#row-lr", "#row-opt", "#row-early", "#row-precision", "#row-resume"):
+                for w in self.query(wid):
+                    w.display = False
+            self.query_one("#col-epochs").display = self.spec.task == "clustering"
+            self.query_one("#epochs-label", Label).update("Max rounds")
+            self.query_one("#epochs", Input).value = "100"
+            self.query_one("#sysmon", SystemPanel).cpu_only = "classic algorithms run on the CPU, in seconds"
 
     # -- system monitor --------------------------------------------------------
 
@@ -249,6 +276,10 @@ class TrainScreen(Screen):
             # A new language model starts on the bundled sample text, ready to train.
             prev = {"source": "text_corpus", "path": str(datamod.EXAMPLE_CORPUS),
                     "tokenizer": self.spec.data.get("tokenizer", "char")}
+        if not prev and is_unsupervised(self.spec.task):
+            # Four clouds of points to find, or handwritten digits for an image model.
+            prev = {"source": "mnist"} if self.spec.input_shape == [1, 28, 28] else \
+                {"source": "synthetic", "kind": "blobs"}
         if not prev:
             return
         try:
@@ -310,7 +341,7 @@ class TrainScreen(Screen):
         self.query_one("#grp-text").display = src == "csv_text"
         self.query_one("#grp-image").display = src == "image_csv"
         self.query_one("#grp-hf").display = src == "hf"
-        self.query_one("#grp-task").display = src == "csv"
+        self.query_one("#grp-task").display = src == "csv" and not self.unsupervised
         self.query_one("#grp-synth").display = src == "synthetic"
         self.query_one("#grp-corpus").display = src == "text_corpus"
         label = {"image_folder": "Folder  [dim](one sub-folder per class)[/]",
@@ -429,6 +460,9 @@ class TrainScreen(Screen):
                    f"{'…' if len(info.class_names) > 8 else ''}") if info.class_names else "regression target"
         if info.task == "language_model":
             classes = f"predicts the next of {info.n_outputs:,} {info.preprocess['tokenizer']} tokens"
+        elif is_unsupervised(info.task):
+            classes = (f"labels kept aside to check the groups: {', '.join(info.class_names[:8])}"
+                       f"{'…' if len(info.class_names) > 8 else ''}") if info.class_names else "no labels used"
         used = f" (using {len(self.train_ds):,})" if n else ""
         self.query_one("#data-info", Static).update(
             f"[green]✓[/] {info.description}\n"
@@ -666,6 +700,8 @@ class TrainScreen(Screen):
             _, model, note = self.ws.load_model(self.model_name, self.spec)
         else:
             model, note = self.spec.build(), "fresh random weights"
+        if self.classic:
+            note = "fitted from scratch"
         if self.finetune and self.query_one("#reset_head", Switch).value:
             reset_head(self.spec, model)
             note += ", output layer re-initialised"
@@ -684,8 +720,16 @@ class TrainScreen(Screen):
         self.loss_hist, self.val_hist, self.metric_hist, self.train_metric_hist = [], [], [], []
         chart = self.query_one("#chart-metric", LineChart)
         chart.title, chart.fmt = {"classification": ("Accuracy", "{:.0%}"),
-                                  "language_model": ("Perplexity", "{:.3g}")}.get(
+                                  "language_model": ("Perplexity", "{:.3g}"),
+                                  "clustering": ("Silhouette", "{:.2f}"),
+                                  "pca": ("Variation kept", "{:.0%}"),
+                                  "autoencoder": ("Variation kept", "{:.0%}")}.get(
             self.spec.task, ("Mean abs. error", "{:.3g}"))
+        self.query_one("#chart-loss", LineChart).title = {
+            "clustering": "Spread within groups", "pca": "Rebuild error",
+            "autoencoder": "Rebuild error"}.get(self.spec.task, "Loss")
+        for c in (chart, self.query_one("#chart-loss", LineChart)):
+            c.unit = "round" if self.classic else "epoch"
         self.query_one("#chart-loss", LineChart).set_data([], [])
         chart.set_data([], [])
         self.query_one("#start", Button).disabled = True
@@ -709,21 +753,31 @@ class TrainScreen(Screen):
         self.query_one("#sysmon", SystemPanel).training_progress(
             ((epoch - 1) * steps + step) * self._batch_size, self._device)
         self.query_one("#progress", ProgressBar).update(progress=epoch - 1 + step / steps)
-        self.query_one("#epoch-label", Static).update(f"  epoch {epoch}/{epochs} · batch {step}/{steps} · "
-                                                       f"loss {loss:.4f}")
+        self.query_one("#epoch-label", Static).update(
+            f"  round {epoch} (stops by itself, at most {epochs}) · spread {loss:.4f}" if self.classic else
+            f"  epoch {epoch}/{epochs} · batch {step}/{steps} · loss {loss:.4f}")
 
     def _on_epoch(self, r: dict) -> None:
         self.loss_hist.append(r["train_loss"])
-        parts = [f"epoch {r['epoch']:>3}", f"loss {r['train_loss']:.4f}"]
+        parts = [f"{'round' if self.classic else 'epoch'} {r['epoch']:>3}",
+                 f"{'spread' if self.spec.task == 'clustering' else 'loss'} {r['train_loss']:.4f}"]
         if "train_acc" in r:
             self.train_metric_hist.append(r["train_acc"])
             parts.append(f"acc {r['train_acc']:.1%}")
         if "train_ppl" in r:
             self.train_metric_hist.append(r["train_ppl"])
             parts.append(f"ppl {r['train_ppl']:.2f}")
+        if r.get("train_kept") is not None:
+            self.train_metric_hist.append(r["train_kept"])
+            parts.append(f"kept {r['train_kept']:.1%}")
+        if r.get("train_silhouette") is not None:
+            self.train_metric_hist.append(r["train_silhouette"])
+            parts.append(f"silhouette {r['train_silhouette']:.3f}")
+        if "moved" in r and r["epoch"] > 1:  # in round 1 every example gets its first group
+            parts.append(f"{r['moved']:,} changed group")
         if "val_loss" in r:
             self.val_hist.append(r["val_loss"])
-            parts.append(f"│ val loss {r['val_loss']:.4f}")
+            parts.append(f"│ val {'spread' if self.spec.task == 'clustering' else 'loss'} {r['val_loss']:.4f}")
         if "val_acc" in r:
             self.metric_hist.append(r["val_acc"])
             parts.append(f"val acc [b]{r['val_acc']:.1%}[/b]")
@@ -733,6 +787,12 @@ class TrainScreen(Screen):
         elif "val_ppl" in r:
             self.metric_hist.append(r["val_ppl"])
             parts.append(f"val ppl [b]{r['val_ppl']:.2f}[/b]")
+        elif r.get("val_kept") is not None:
+            self.metric_hist.append(r["val_kept"])
+            parts.append(f"val kept [b]{r['val_kept']:.1%}[/b]")
+        elif r.get("val_silhouette") is not None:
+            self.metric_hist.append(r["val_silhouette"])
+            parts.append(f"val silhouette [b]{r['val_silhouette']:.3f}[/b]")
         self._refresh_drawer("charts")
         self.query_one("#chart-loss", LineChart).set_data(self.loss_hist, self.val_hist)
         self.query_one("#chart-metric", LineChart).set_data(self.train_metric_hist, self.metric_hist)
@@ -767,6 +827,8 @@ class TrainScreen(Screen):
         if not run["epochs"]:
             log.write("[yellow]No epoch completed - nothing saved.[/]")
             return
+        if self.classic:  # k-means usually stops long before its maximum number of rounds
+            self.query_one("#progress", ProgressBar).update(total=1, progress=1)
         self.spec.data["preprocess"] = self.info.preprocess
         if self.spec.class_names != self.info.class_names:
             # A head that is already the right size isn't a mismatch, so auto-fit never ran.
@@ -788,9 +850,17 @@ class TrainScreen(Screen):
         last = run["epochs"][-1]
         metric = (f", val acc {last['val_acc']:.1%}" if "val_acc" in last else
                   f", val MAE {last['val_mae']:.4g}" if "val_mae" in last else
-                  f", val perplexity {last['val_ppl']:.2f}" if "val_ppl" in last else "")
-        msg = f"Saved '{save_as}' (best weights, {len(run['epochs'])} epochs{metric})"
+                  f", val perplexity {last['val_ppl']:.2f}" if "val_ppl" in last else
+                  f", variation kept {last['val_kept']:.1%}" if last.get("val_kept") is not None else
+                  f", silhouette {last['val_silhouette']:.3f}" if last.get("val_silhouette") is not None else "")
+        steps = "fitted in one step" if self.spec.task == "pca" else \
+            f"{len(run['epochs'])} round{'s' if len(run['epochs']) != 1 else ''}" if self.classic else \
+            f"best weights, {len(run['epochs'])} epochs"
+        msg = f"Saved '{save_as}' ({steps}{metric})"
         log.write(f"[green]✓ {msg}[/]")
+        if self.unsupervised:
+            log.write("[cyan]Next:[/] press [b]Esc[/b], then [b]v[/b] (Evaluate) for a map of the data and its "
+                      "most unusual examples, or [b]p[/b] (Use) to check new examples.")
         self.notify(msg)
         if self.finetune and save_as != self.model_name and not self.query_one("#resume-run").display:
             # Further runs on this screen continue from the new model (unless this one can be resumed).

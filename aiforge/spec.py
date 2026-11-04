@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import copy
 import json
+import math
 import re
 import shutil
 import time
@@ -17,6 +18,23 @@ from torch import nn
 from .layers import REGISTRY, Shape, count_params, output_shape
 
 DTYPES = {"float": torch.float32, "long": torch.long}
+
+# What a model learns from: answers (labels) or the inputs alone.
+SUPERVISED_TASKS = ("classification", "regression", "language_model")
+UNSUPERVISED_TASKS = ("clustering", "pca", "autoencoder")
+# Classic algorithms are one fitted layer, not a network trained with gradients.
+CLASSIC_TASKS = {"clustering": "KMeans", "pca": "PCA"}
+TASK_LABELS = {"classification": "classification", "regression": "regression",
+               "language_model": "language model", "clustering": "clustering (k-means)",
+               "pca": "dimensionality reduction (PCA)", "autoencoder": "autoencoder"}
+
+
+def is_unsupervised(task: str) -> bool:
+    return task in UNSUPERVISED_TASKS
+
+
+def style_badge(task: str) -> str:
+    return "🔍" if is_unsupervised(task) else "🎯"
 
 
 @dataclass
@@ -48,7 +66,9 @@ class ModelSpec:
     name: str
     input_shape: list[int]
     input_dtype: str = "float"  # "float" or "long" (token ids)
-    task: str = "classification"  # "regression" or "language_model" (predict the next token)
+    # "regression", "language_model" (predict the next token), or unsupervised: "clustering",
+    # "pca", "autoencoder" (see UNSUPERVISED_TASKS)
+    task: str = "classification"
     layers: list[LayerSpec] = field(default_factory=list)
     class_names: list[str] = field(default_factory=list)
     # Preprocessing learned from the training data (normalisation stats, image size...).
@@ -91,6 +111,8 @@ class ModelSpec:
         if not self.layers:
             problems.append("The model has no layers.")
         out = None if problems else self.output_shape()
+        if is_unsupervised(self.task):
+            return problems + self._unsupervised_problems(out)
         if out is not None and self.task == "language_model":
             problems += self._language_model_problems(out)
             return problems
@@ -103,6 +125,39 @@ class ModelSpec:
                             f"{len(self.class_names)} classes. Set the last Linear's "
                             f"out_features to {len(self.class_names)}.")
         return problems
+
+    def _unsupervised_problems(self, out: Shape | None) -> list[str]:
+        if self.input_dtype != "float":
+            return ["Unsupervised models learn from numbers and images: set the input type to 'float'."]
+        layer = CLASSIC_TASKS.get(self.task)
+        if layer:
+            what = "A k-means model" if self.task == "clustering" else "A PCA model"
+            if [l.type for l in self.layers] != [layer]:
+                return [f"{what} is a single {layer} layer (a classic algorithm, not a neural "
+                        f"network). Remove the other layers."]
+            return []
+        if out is not None and tuple(out) != tuple(self.input_shape):
+            hint = (f" Set the last Linear's out_features to {self.input_shape[0]}."
+                    if len(self.input_shape) == 1 else "")
+            return [f"An autoencoder must rebuild its input, so it has to output the input's shape "
+                    f"{tuple(self.input_shape)}, but this one outputs {tuple(out)}.{hint}"]
+        if any(l.type in CLASSIC_TASKS.values() for l in self.layers):
+            return ["KMeans and PCA are whole models on their own: create a clustering or PCA model "
+                    "for them instead of adding them to an autoencoder."]
+        return []
+
+    def bottleneck(self) -> int | None:
+        """Index of the autoencoder's narrowest layer (its compressed code), None if there is none."""
+        infos = self.analyze()
+        if self.task != "autoencoder" or not infos or any(i.error for i in infos):
+            return None
+        sizes = [math.prod(i.out_shape) for i in infos[:-1]]
+        if not sizes:
+            return None
+        idx = sizes.index(min(sizes))
+        if idx + 1 < len(sizes) and REGISTRY[self.layers[idx + 1].type].category == "Activation":
+            idx += 1  # the code is what comes out of the bottleneck's activation
+        return idx
 
     def vocab_size(self) -> int | None:
         """Number of tokens the first Embedding knows (None without one)."""
@@ -459,6 +514,30 @@ TEMPLATES: dict[str, dict] = {
         layers=lambda: [_L("Embedding", num_embeddings=96, embedding_dim=64),
                         _L("LSTM", hidden_size=256, num_layers=2, return_sequence=True, dropout=0.1),
                         _L("Linear", out_features=96)]),
+    # --- unsupervised: no labels needed ---
+    "k-means clustering (4 groups)": dict(
+        input_shape=[2], task="clustering", layers=lambda: [_L("KMeans", k=4)]),
+    "PCA (2 components, for a 2-D map)": dict(
+        input_shape=[10], task="pca", layers=lambda: [_L("PCA", n_components=2)]),
+    "Autoencoder (tables, 2-number code)": dict(
+        # Squeeze each row through 2 numbers and rebuild it: rows it rebuilds badly are unusual.
+        input_shape=[10], task="autoencoder",
+        layers=lambda: [_L("Linear", out_features=32), _L("ReLU"), _L("Linear", out_features=8), _L("ReLU"),
+                        _L("Linear", out_features=2), _L("Tanh"),
+                        _L("Linear", out_features=8), _L("ReLU"), _L("Linear", out_features=32), _L("ReLU"),
+                        _L("Linear", out_features=10)]),
+    "Image autoencoder (28×28 grayscale, e.g. MNIST)": dict(
+        input_shape=[1, 28, 28], task="autoencoder",
+        layers=lambda: [_L("Flatten"), _L("Linear", out_features=256), _L("ReLU"),
+                        _L("Linear", out_features=32), _L("ReLU"),
+                        _L("Linear", out_features=256), _L("ReLU"), _L("Linear", out_features=784),
+                        _L("Unflatten", channels=1, height=28, width=28)]),
+    "Conv autoencoder (28×28 grayscale)": dict(
+        input_shape=[1, 28, 28], task="autoencoder",
+        layers=lambda: [_L("Conv2d", out_channels=16), _L("ReLU"), _L("MaxPool2d"),
+                        _L("Conv2d", out_channels=4), _L("ReLU"), _L("MaxPool2d"),
+                        _L("ConvTranspose2d", out_channels=16), _L("ReLU"),
+                        _L("ConvTranspose2d", out_channels=1)]),
 }
 
 
@@ -486,6 +565,15 @@ MODEL_TYPES: dict[str, list[str]] = {
                                                         "Bag of words (Embedding + average, fastest)"],
     MANUAL: ["Blank"],
 }
+# The same for models that learn without labels.
+UNSUPERVISED_TYPES: dict[str, list[str]] = {
+    "🔵 Clustering: find groups (k-means, classic)": ["k-means clustering (4 groups)"],
+    "📉 Dimensionality reduction (PCA, classic)": ["PCA (2 components, for a 2-D map)"],
+    "🧠 Autoencoder: oddities & 2-D map (neural network)": ["Autoencoder (tables, 2-number code)",
+                                                           "Image autoencoder (28×28 grayscale, e.g. MNIST)",
+                                                           "Conv autoencoder (28×28 grayscale)"],
+}
+LEARNING_STYLES = {"supervised": MODEL_TYPES, "unsupervised": UNSUPERVISED_TYPES}
 
 
 def from_template(template: str, name: str) -> ModelSpec:
@@ -506,7 +594,8 @@ def to_pytorch_source(spec: ModelSpec) -> str:
     body = repr(model).replace("\n", "\n    ")
     custom_types = {"LSTM": "RNNBlock", "GRU": "RNNBlock", "PretrainedBackbone": "PretrainedBackbone",
                     "PositionalEncoding": "PositionalEncoding", "TransformerEncoder": "TransformerBlock",
-                    "SequencePool": "SequencePool", "PatchEmbedding": "PatchEmbedding"}
+                    "SequencePool": "SequencePool", "PatchEmbedding": "PatchEmbedding",
+                    "KMeans": "KMeans", "PCA": "PCA"}
     custom = sorted({custom_types[l.type] for l in spec.layers if l.type in custom_types})
     lines = [
         f'"""{spec.name} - generated by AIForge.',
@@ -557,6 +646,15 @@ def _layer_ctor(spec: ModelSpec, layer: LayerSpec) -> str:
     if t in ("Conv2d", "Conv1d"):
         return (f"nn.{t}({s[0]}, {c['out_channels']}, kernel_size={c['kernel_size']}, "
                 f"stride={c['stride']}, padding={c['padding']}, bias={c['bias']})")
+    if t == "ConvTranspose2d":
+        return (f"nn.ConvTranspose2d({s[0]}, {c['out_channels']}, kernel_size={c['kernel_size']}, "
+                f"stride={c['stride']}, padding={c['padding']}, bias={c['bias']})")
+    if t == "Unflatten":
+        return f"nn.Unflatten(1, ({c['channels']}, {c['height']}, {c['width']}))"
+    if t == "KMeans":
+        return f"KMeans({math.prod(s)}, {c['k']})"
+    if t == "PCA":
+        return f"PCA({math.prod(s)}, {c['n_components']})"
     if t in ("MaxPool2d", "AvgPool2d"):
         return f"nn.{t}(kernel_size={c['kernel_size']}, stride={c['stride']})"
     if t == "GlobalAvgPool":

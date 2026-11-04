@@ -151,6 +151,39 @@ class PatchEmbedding(nn.Module):
         return self.proj(x).flatten(2).transpose(1, 2)  # (B, num_patches, embed_dim)
 
 
+class KMeans(nn.Module):
+    """k-means clustering: ``k`` centre points (centroids) found by ``unsupervised.fit_kmeans``,
+    not by gradient descent. Outputs the distance from the input to every centre; the nearest
+    one is the input's group."""
+
+    def __init__(self, n_features: int, k: int):
+        super().__init__()
+        self.register_buffer("centroids", torch.zeros(k, n_features))
+
+    def forward(self, x):
+        x = x.flatten(1)
+        c = self.centroids
+        d2 = (x * x).sum(1, keepdim=True) - 2 * x @ c.T + (c * c).sum(1)
+        return d2.clamp_min(0).sqrt()
+
+
+class PCA(nn.Module):
+    """Principal component analysis: the directions along which the data varies most, found by
+    ``unsupervised.fit_pca``. Outputs the input's coordinates along the first ``n_components``."""
+
+    def __init__(self, n_features: int, n_components: int):
+        super().__init__()
+        self.register_buffer("mean", torch.zeros(n_features))
+        self.register_buffer("components", torch.zeros(n_components, n_features))
+
+    def forward(self, x):
+        return (x.flatten(1) - self.mean) @ self.components.T
+
+    def reconstruct(self, z):
+        """Back from coordinates to (flat) inputs: what the components can rebuild."""
+        return z @ self.components + self.mean
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -186,6 +219,23 @@ register(LayerType(
 register(LayerType(
     "Flatten", "Core", "Flatten everything except the batch into one vector.",
     [], build=lambda s, c: nn.Flatten(),
+))
+
+def _unflatten(s: Shape, c: dict) -> nn.Module:
+    shape = (c["channels"], c["height"], c["width"])
+    if math.prod(shape) != s[0]:
+        raise ValueError(f"needs {'×'.join(map(str, shape))} = {math.prod(shape):,} values but gets "
+                         f"{s[0]:,} - set the Linear above to {math.prod(shape):,} outputs")
+    return nn.Unflatten(1, shape)
+
+
+register(LayerType(
+    "Unflatten", "Core", "Fold a flat list back into an image: (C·H·W,) → (C, H, W). The opposite of "
+    "Flatten, used at the end of image autoencoders.",
+    [Param("channels", "int", 1, "Image channels (1 = grayscale, 3 = colour)", minimum=1),
+     Param("height", "int", 28, "Image height in pixels", minimum=1),
+     Param("width", "int", 28, "Image width in pixels", minimum=1)],
+    build=_unflatten, ranks=(1,),
 ))
 
 register(LayerType(
@@ -239,6 +289,22 @@ register(LayerType(
     [Param("kernel_size", "int", 2, "Window size", minimum=1),
      Param("stride", "int", 2, "Step between windows", minimum=1)],
     build=lambda s, c: nn.AvgPool2d(c["kernel_size"], c["stride"]),
+    ranks=(3,),
+))
+
+register(LayerType(
+    "ConvTranspose2d", "Convolution",
+    "Grow an image: the opposite of Conv2d + pooling. With kernel 2 and stride 2 it doubles the "
+    "height and width. Used in the decoder of image autoencoders.",
+    [Param("out_channels", "int", 16, "Number of filters", minimum=1),
+     Param("kernel_size", "int", 2, "Filter size", minimum=1),
+     Param("stride", "int", 2, "Growth factor (2 = twice as tall and wide)", minimum=1),
+     Param("padding", "int", 0, "Pixels trimmed from each side", minimum=0),
+     Param("bias", "bool", True, "Learn a bias per filter")],
+    build=lambda s, c: nn.ConvTranspose2d(s[0], c["out_channels"], c["kernel_size"], c["stride"],
+                                          c["padding"], bias=c["bias"]),
+    formula=lambda s, c: f"{s[0]}×{c['out_channels']}×{c['kernel_size']}²"
+                         + (f" + {c['out_channels']}" if c["bias"] else ""),
     ranks=(3,),
 ))
 
@@ -406,8 +472,37 @@ register(LayerType(
 ))
 
 
+# ---------------------------------------------------------------------------
+# Classic machine learning (fitted in one go, not trained with gradients)
+# ---------------------------------------------------------------------------
+
+
+def _pca_build(s: Shape, c: dict) -> nn.Module:
+    n = math.prod(s)
+    if c["n_components"] > n:
+        raise ValueError(f"n_components ({c['n_components']}) can't be more than the {n:,} input values")
+    return PCA(n, c["n_components"])
+
+
+register(LayerType(
+    "KMeans", "Classic ML",
+    "k-means clustering: finds k groups of similar examples. Outputs the distance to each group's "
+    "centre; the nearest is the answer. A whole model on its own (no other layers).",
+    [Param("k", "int", 4, "Number of groups to find", minimum=1)],
+    build=lambda s, c: KMeans(math.prod(s), c["k"]),
+))
+
+register(LayerType(
+    "PCA", "Classic ML",
+    "Principal component analysis: squeezes the input into a few numbers that keep as much of "
+    "its variation as possible. A whole model on its own (no other layers).",
+    [Param("n_components", "int", 2, "How many numbers to keep (2 = a 2-D map)", minimum=1)],
+    build=_pca_build,
+))
+
+
 CATEGORIES = ["Core", "Convolution", "Normalization", "Activation", "Regularization",
-              "Sequence", "Transformer", "Transfer"]
+              "Sequence", "Transformer", "Transfer", "Classic ML"]
 
 
 def by_category() -> dict[str, list[LayerType]]:

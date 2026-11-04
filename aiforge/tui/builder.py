@@ -15,7 +15,8 @@ from textual.widgets.option_list import Option
 
 from ..guide import layer_card_markdown, model_card_markdown
 from ..layers import REGISTRY, by_category, coerce
-from ..spec import LayerSpec, ModelSpec, remap_state, safe_name
+from ..spec import (SUPERVISED_TASKS, TASK_LABELS, UNSUPERVISED_TASKS, LayerSpec, ModelSpec, is_unsupervised,
+                    remap_state, safe_name, style_badge)
 from .modals import SaveChangesDialog
 
 BAR = 8
@@ -179,7 +180,8 @@ class BuilderScreen(Screen):
             f"size {total * 4 / 1024 ** 2:.2f} MB (fp32)   output {_shape(out)}\n{status}")
         dirty = "  [yellow]● unsaved[/]" if self.dirty else ""
         self.query_one("#stack-title", Static).update(
-            f"Model [b]{self.spec.name}[/b] · {self.spec.task} · {len(self.spec.layers)} layers{dirty}")
+            f"Model [b]{self.spec.name}[/b] · {style_badge(self.spec.task)} {TASK_LABELS.get(self.spec.task, self.spec.task)}"
+            f" · {len(self.spec.layers)} layers{dirty}")
 
     @property
     def dirty(self) -> bool:
@@ -282,11 +284,13 @@ class BuilderScreen(Screen):
             Label("Input type"),
             Select([("float - numbers / images", "float"), ("long - token ids (text)", "long")],
                    value=s.input_dtype, allow_blank=False, id="m-dtype"),
-            Label("Task"),
-            Select([("classification", "classification"), ("regression", "regression"),
-                    ("language model (next token)", "language_model")],
+            # The learning style is chosen when the model is created; only tasks of that style here.
+            Label(f"Task  [dim]{style_badge(s.task)} {'unsupervised' if is_unsupervised(s.task) else 'supervised'}[/]"),
+            Select([(TASK_LABELS[t], t) for t in
+                    (UNSUPERVISED_TASKS if is_unsupervised(s.task) else SUPERVISED_TASKS)],
                    value=s.task, allow_blank=False, id="m-task"),
-            Label("Class names  [dim]comma-separated, optional[/]"),
+            Label("Class names  [dim]comma-separated, optional[/]" if not is_unsupervised(s.task) else
+                  "Labels kept aside  [dim]to check the groups, optional[/]"),
             Input(", ".join(s.class_names), id="m-classes"),
             Static("", id="prop-error", classes="error"),
         ]

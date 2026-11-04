@@ -14,6 +14,8 @@ METRICS = {
     "val_mae": ("Validation MAE", "{:.4g}", "min"),
     "val_ppl": ("Validation perplexity", "{:.3g}", "min"),
     "train_ppl": ("Training perplexity", "{:.3g}", "min"),
+    "val_kept": ("Validation variation kept", "{:.1%}", "max"),
+    "val_silhouette": ("Validation silhouette", "{:.3f}", "max"),
 }
 SETTINGS = ("lr", "batch_size", "optimizer", "scheduler", "weight_decay", "precision")
 

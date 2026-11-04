@@ -14,7 +14,7 @@ from torch import nn
 from torch.utils.data import DataLoader
 
 from .data import DataInfo, loader_workers
-from .spec import ModelSpec
+from .spec import CLASSIC_TASKS, ModelSpec, is_unsupervised
 
 
 @dataclass
@@ -82,6 +82,10 @@ def fit_spec_to_data(spec: ModelSpec, info: DataInfo) -> list[str]:
             changes.append(f"classes → {len(info.class_names)} ({', '.join(info.class_names[:5])}"
                            f"{'…' if len(info.class_names) > 5 else ''})")
         spec.class_names = list(info.class_names)
+    if is_unsupervised(info.task):  # no output head to size: the model never predicts a label
+        if spec.task == "autoencoder":
+            changes += _fit_autoencoder_output(spec)
+        return changes
     if info.task == "language_model":
         emb = next((l for l in spec.layers if l.type == "Embedding"), None)
         if emb and emb.config["num_embeddings"] != info.n_outputs:
@@ -94,6 +98,27 @@ def fit_spec_to_data(spec: ModelSpec, info: DataInfo) -> list[str]:
     return changes
 
 
+def _fit_autoencoder_output(spec: ModelSpec) -> list[str]:
+    """Make an autoencoder's last layers output the input's shape again."""
+    shape, changes = list(spec.input_shape), []
+    unflatten = next((l for l in reversed(spec.layers) if l.type == "Unflatten"), None)
+    if unflatten and len(shape) == 3:
+        new = dict(zip(("channels", "height", "width"), shape))
+        if any(unflatten.config[k] != v for k, v in new.items()):
+            changes.append(f"rebuilt image → {'×'.join(map(str, shape))}")
+            unflatten.config.update(new)
+    size = math.prod(shape) if unflatten or len(shape) == 1 else None
+    linear = next((l for l in reversed(spec.layers) if l.type == "Linear"), None)
+    if size and linear and linear.config["out_features"] != size:
+        changes.append(f"output layer {linear.config['out_features']} → {size} units")
+        linear.config["out_features"] = size
+    conv = next((l for l in reversed(spec.layers) if l.type in ("ConvTranspose2d", "Conv2d")), None)
+    if len(shape) == 3 and not unflatten and conv and conv.config["out_channels"] != shape[0]:
+        changes.append(f"output channels {conv.config['out_channels']} → {shape[0]}")
+        conv.config["out_channels"] = shape[0]
+    return changes
+
+
 def data_mismatch(spec: ModelSpec, info: DataInfo) -> list[str]:
     probs = []
     if list(spec.input_shape) != list(info.input_shape):
@@ -101,8 +126,11 @@ def data_mismatch(spec: ModelSpec, info: DataInfo) -> list[str]:
     if spec.input_dtype != info.input_dtype:
         probs.append(f"Model input type is '{spec.input_dtype}' but data is '{info.input_dtype}'")
     out = spec.output_shape()
-    if out is not None and out != info.output_shape:
+    if out is not None and not is_unsupervised(info.task) and out != info.output_shape:
         probs.append(f"Model outputs {out} but the data needs {info.output_shape}")
+    if spec.task == "autoencoder" and out is not None and list(out) != list(info.input_shape):
+        probs.append(f"An autoencoder must output the input's shape {tuple(info.input_shape)}, "
+                     f"but this one outputs {out}")
     if spec.task != info.task:
         probs.append(f"Model task is {spec.task} but data is {info.task}")
     vocab = spec.vocab_size()
@@ -173,7 +201,7 @@ class Trainer:
         return self._stop.is_set()
 
     def _loss_fn(self):
-        return nn.MSELoss() if self.spec.task == "regression" else nn.CrossEntropyLoss()
+        return nn.MSELoss() if self.spec.task in ("regression", "autoencoder") else nn.CrossEntropyLoss()
 
     def _optimizer(self):
         params = [p for p in self.model.parameters() if p.requires_grad]
@@ -193,7 +221,91 @@ class Trainer:
                 mod.eval()
 
     def run(self, resume: dict | None = None) -> dict:
-        """Train; ``resume`` is a checkpoint (see load_checkpoint) to continue instead of starting over."""
+        """Train; ``resume`` is a checkpoint (see load_checkpoint) to continue instead of starting over.
+
+        Unsupervised models also store what is normal for them (see unsupervised.reference_stats)
+        in ``spec.data["unsupervised"]``, so the caller saves it with the weights."""
+        if self.spec.task in CLASSIC_TASKS:
+            return self._run_classic()
+        run = self._run_network(resume)
+        if self.spec.task == "autoencoder" and run["epochs"]:
+            self._store_reference()
+        return run
+
+    def _store_reference(self, x: torch.Tensor | None = None) -> None:
+        from . import unsupervised as un
+
+        if x is None:
+            x, _ = un.gather(self.train_ds, min(20_000, un.example_limit(self.spec.input_shape)))
+        self.spec.data["unsupervised"] = un.reference_stats(self.spec, self.model, x)
+
+    def _run_classic(self) -> dict:
+        """Fit k-means or PCA on the training data, held in memory, on the CPU (fast enough, and
+        works everywhere). The epochs setting is k-means' maximum number of rounds."""
+        from . import unsupervised as un
+
+        c, layer, t_start = self.cfg, self.model[0], time.time()
+        self.model.cpu()
+        limit = un.example_limit(self.spec.input_shape)
+        x, _ = un.gather(self.train_ds, limit)
+        xv, _ = un.gather(self.val_ds, limit)
+        note = f" (a random {len(x):,} of {len(self.train_ds):,})" if len(x) < len(self.train_ds) else ""
+        self.on_log(f"Device: cpu (classic algorithms) · fitting on {len(x):,} training examples{note} "
+                    f"× {math.prod(self.spec.input_shape):,} values · {len(xv):,} validation examples")
+        if self.spec.task == "clustering":
+            k = layer.centroids.shape[0]
+            for it, inertia, moved in un.fit_kmeans(layer, x, c.epochs, stop=self._stop):
+                t0 = time.time()
+                rec = {"epoch": it, "train_loss": inertia, "moved": moved}
+                check = xv if len(xv) else x
+                groups = un.assign(self.model, check)
+                if len(xv):
+                    rec["val_loss"] = float((un.scores(self.spec, self.model, xv) ** 2).mean())
+                rec["val_silhouette" if len(xv) else "train_silhouette"] = un.silhouette(check, groups)
+                rec["seconds"] = round(time.time() - t0, 2)
+                self.epochs.append(rec)
+                if self.on_batch:
+                    self.on_batch(it, 1, 1, inertia)
+                if self.on_epoch:
+                    self.on_epoch(rec)
+                if moved == 0:
+                    self.on_log(f"Converged after {it} rounds: no example changed group any more.")
+            if self.epochs and self.epochs[-1]["moved"] and not self.stopped:
+                self.on_log(f"Stopped after {c.epochs} rounds while examples were still changing group "
+                            f"({self.epochs[-1]['moved']:,} in the last round): raise Max rounds.")
+            if self.epochs:
+                sizes = torch.bincount(un.assign(self.model, x), minlength=k).tolist()
+                self.on_log("Group sizes: " + " · ".join(f"{un.group_name(i)}: {n:,}" for i, n in enumerate(sizes)))
+        else:
+            ratio = un.fit_pca(layer, x)
+            rec = {"epoch": 1, "train_loss": float(un.scores(self.spec, self.model, x).mean()),
+                   "train_kept": un.variance_kept(self.spec, self.model, x),
+                   "explained": [round(float(v), 6) for v in ratio]}
+            if len(xv):
+                rec["val_loss"] = float(un.scores(self.spec, self.model, xv).mean())
+                rec["val_kept"] = un.variance_kept(self.spec, self.model, xv)
+            rec["seconds"] = round(time.time() - t_start, 2)
+            self.epochs.append(rec)
+            if self.on_epoch:
+                self.on_epoch(rec)
+            self.on_log("Variation kept by each component: " +
+                        " · ".join(f"{i + 1}: {v:.1%}" for i, v in enumerate(ratio.tolist())))
+        if self.checkpoint:
+            self.checkpoint.unlink(missing_ok=True)  # one quick fit: nothing to resume
+        if self.epochs:
+            self._store_reference(x)
+            self.best_state = {k: v.clone() for k, v in self.model.state_dict().items()}
+        last = self.epochs[-1] if self.epochs else {}
+        return {
+            "started": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(t_start)),
+            "duration_s": round(time.time() - t_start, 1),
+            "config": asdict(c),
+            "epochs": self.epochs,
+            "best_score": last.get("val_loss", last.get("train_loss")),
+            "stopped": self.stopped,
+        }
+
+    def _run_network(self, resume: dict | None) -> dict:
         c = self.cfg
         dev = pick_device(c.device)
         self.model.to(dev)
@@ -240,6 +352,7 @@ class Trainer:
         t_start, complete = time.time(), False
         steps = len(train_dl)
         lm = self.spec.task == "language_model"
+        ae = self.spec.task == "autoencoder"  # learns to rebuild its input: the input is the answer
         for epoch in range(first, c.epochs + 1):
             self._set_train_mode()
             run_loss, run_correct, seen, done = 0.0, 0, 0, 0
@@ -253,6 +366,8 @@ class Trainer:
                     out = self.model(x)
                     if lm:
                         loss = lm_loss(out, y, loss_fn)
+                    elif ae:
+                        loss = loss_fn(out, x)
                     else:
                         loss = loss_fn(out, y.float() if self.spec.task == "regression" else y)
                 opt.zero_grad(set_to_none=True)
@@ -347,13 +462,23 @@ def perplexity(loss: float) -> float:
 def evaluate(model: nn.Module, loader, task: str, dev, loss_fn=None, target_std: float = 1.0,
              amp: torch.dtype | None = None) -> dict:
     model.eval()
-    loss_fn = loss_fn or (nn.MSELoss() if task == "regression" else nn.CrossEntropyLoss())
+    loss_fn = loss_fn or (nn.MSELoss() if task in ("regression", "autoencoder") else nn.CrossEntropyLoss())
     tot, correct, n, abs_err = 0.0, 0, 0, 0.0
+    sse, sums, squares = 0.0, 0.0, 0.0  # autoencoder: how much of the variation it rebuilds
     for x, y in loader:
         x, y = x.to(dev), y.to(dev)
         with torch.autocast(dev.type, dtype=amp, enabled=amp is not None):
             out = model(x)
         out = out.float()  # metrics in full precision
+        if task == "autoencoder":
+            flat = x.flatten(1).float()
+            tot += loss_fn(out, x).item() * x.shape[0]
+            sse += ((out.flatten(1) - flat) ** 2).sum().item()
+            # Running totals in float64 on the CPU: Apple GPUs (MPS) have no float64.
+            sums = sums + flat.sum(0).cpu().double()
+            squares = squares + (flat ** 2).sum(0).cpu().double()
+            n += x.shape[0]
+            continue
         if task == "language_model":
             tot += lm_loss(out, y, loss_fn).item() * x.shape[0]
             correct += (out.argmax(-1) == y).float().mean(1).sum().item()
@@ -365,6 +490,10 @@ def evaluate(model: nn.Module, loader, task: str, dev, loss_fn=None, target_std:
         elif task == "regression":
             abs_err += (out - y).abs().sum().item()
     res = {"val_loss": tot / max(1, n)}
+    if task == "autoencoder":
+        total = float((squares - sums ** 2 / max(1, n)).sum()) if n else 0.0
+        res["val_kept"] = 1 - sse / total if total > 0 else None
+        return res
     if task == "classification":
         res["val_acc"] = correct / max(1, n)
     elif task == "language_model":

@@ -173,9 +173,10 @@ def cmd_list(ws, args) -> None:
 
 
 def _template_names() -> list[tuple[str, str]]:
-    from .spec import MODEL_TYPES
+    from .spec import LEARNING_STYLES
 
-    return [(kind, t) for kind, names in MODEL_TYPES.items() for t in names]
+    # Unsupervised types come last, so the numbers of the older templates never change.
+    return [(kind, t) for types in LEARNING_STYLES.values() for kind, names in types.items() for t in names]
 
 
 def cmd_templates(ws, args) -> None:
@@ -225,26 +226,31 @@ def cmd_new(ws, args) -> None:
 
 
 def _epoch_line(r: dict) -> str:
-    parts = [f"epoch {r['epoch']:>3}", f"loss {r['train_loss']:.4f}"]
+    rounds = "moved" in r  # k-means: fitted in rounds, its loss is the spread within groups
+    parts = [f"{'round' if rounds else 'epoch'} {r['epoch']:>3}", f"{'spread' if rounds else 'loss'} {r['train_loss']:.4f}"]
     if "train_acc" in r:
         parts.append(f"acc {r['train_acc']:.1%}")
     if "train_ppl" in r:
         parts.append(f"ppl {r['train_ppl']:.2f}")
     if "val_loss" in r:
-        parts.append(f"│ val loss {r['val_loss']:.4f}")
+        parts.append(f"│ val {'spread' if rounds else 'loss'} {r['val_loss']:.4f}")
     if "val_acc" in r:
         parts.append(f"val acc [b]{r['val_acc']:.1%}[/b]")
     elif "val_mae" in r:
         parts.append(f"val MAE [b]{r['val_mae']:.4g}[/b]")
     elif "val_ppl" in r:
         parts.append(f"val ppl [b]{r['val_ppl']:.2f}[/b]")
+    elif r.get("val_kept") is not None:
+        parts.append(f"variation kept [b]{r['val_kept']:.1%}[/b]")
+    elif r.get("val_silhouette") is not None:
+        parts.append(f"silhouette [b]{r['val_silhouette']:.3f}[/b]")
     parts.append(f"[dim]{r['seconds']}s[/]")
     return "  ".join(parts)
 
 
 def cmd_train(ws, args) -> int:
     from . import pipeline
-    from .spec import ModelSpec
+    from .spec import CLASSIC_TASKS, ModelSpec
     from .trainer import TrainConfig
 
     _need_model(ws, args.model)
@@ -336,9 +342,13 @@ def cmd_train(ws, args) -> int:
     last = min(run["epochs"], key=lambda r: r.get("val_loss", r["train_loss"]))
     best = (f", val acc {last['val_acc']:.1%}" if "val_acc" in last else
             f", val MAE {last['val_mae']:.4g}" if "val_mae" in last else
-            f", val perplexity {last['val_ppl']:.2f}" if "val_ppl" in last else "")
-    out.print(f"[green]✓[/] Saved [b]{spec.name}[/b] (best epoch {last['epoch']} of "
-              f"{len(run['epochs'])}{best}) in {run['duration_s']}s")
+            f", val perplexity {last['val_ppl']:.2f}" if "val_ppl" in last else
+            f", variation kept {last['val_kept']:.1%}" if last.get("val_kept") is not None else
+            f", silhouette {last['val_silhouette']:.3f}" if last.get("val_silhouette") is not None else "")
+    steps = ("fitted in one step" if spec.task == "pca" else
+             f"fitted in {len(run['epochs'])} round{'s' if len(run['epochs']) != 1 else ''}"
+             if spec.task in CLASSIC_TASKS else f"best epoch {last['epoch']} of {len(run['epochs'])}")
+    out.print(f"[green]✓[/] Saved [b]{spec.name}[/b] ({steps}{best}) in {run['duration_s']}s")
     return 0
 
 
@@ -347,6 +357,7 @@ def cmd_train(ws, args) -> int:
 
 def cmd_predict(ws, args) -> None:
     from .predict import predict_batch, predict_one
+    from .spec import is_unsupervised
 
     _need_weights(ws, args.model)
     if not args.file and args.input is None:
@@ -355,6 +366,20 @@ def cmd_predict(ws, args) -> None:
     if args.file:
         path, n = predict_batch(spec, model, args.file, args.out)
         out.print(f"[green]✓[/] Wrote {n:,} predictions to {path}")
+        return
+    if is_unsupervised(spec.task):
+        from .predict import describe
+
+        d = describe(spec, model, args.input)
+        if spec.task == "clustering":
+            out.print(f"[b]→ {d['pairs'][0][0]}[/b]  (distance {d['pairs'][0][1]:.4g})")
+            for label, v in d["pairs"][1:args.top_k]:
+                out.print(f"  [dim]{label}: distance {v:.4g}[/]")
+        else:
+            out.print(f"[b]rebuild error {d['score']:.4g}[/b]")
+            name = "component" if spec.task == "pca" else "code"
+            out.print(f"{name}: " + ", ".join(f"{v:.4g}" for v in d["code"][:16]))
+        out.print(d["verdict"])
         return
     res = predict_one(spec, model, args.input, top_k=args.top_k)
     if spec.task == "regression":
@@ -468,6 +493,10 @@ def cmd_evaluate(ws, args) -> None:
     rows = {"classification": [("Accuracy", "accuracy", True), ("Balanced accuracy", "balanced_accuracy", True),
                                ("Macro F1", "macro_f1", True), ("ROC AUC", "roc_auc", False)],
             "language_model": [("Perplexity", "perplexity", False), ("Token accuracy", "token_accuracy", True)],
+            "clustering": [("Silhouette", "silhouette", False), ("Spread within groups", "spread", False),
+                           ("Purity", "purity", True)],
+            "pca": [("Variation kept", "kept", True), ("Rebuild error", "rebuild_error", False)],
+            "autoencoder": [("Variation kept", "kept", True), ("Rebuild error", "rebuild_error", False)],
             }.get(rep["task"], [("MAE", "mae", False), ("RMSE", "rmse", False), ("R²", "r2", False)])
     for label, key, pct in rows:
         if key in m:

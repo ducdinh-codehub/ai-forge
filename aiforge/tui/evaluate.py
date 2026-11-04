@@ -10,6 +10,7 @@ from textual.widgets import Button, Footer, Header, Input, Label, Markdown, Prog
 
 from .. import data as datamod
 from .. import evaluate as ev
+from ..spec import is_unsupervised
 from ..trainer import pick_device
 
 INTRO = """# Evaluate a model
@@ -45,6 +46,7 @@ class EvaluateScreen(Screen):
         super().__init__()
         self.model_name = name
         self.report: dict | None = None
+        self.unsupervised = False
 
     @property
     def ws(self):
@@ -64,7 +66,7 @@ class EvaluateScreen(Screen):
                         yield Input(id="eval-path")
                         yield Button("📂 Browse", id="eval-browse")
                     with Vertical(id="grp-eval-target", classes="group"):
-                        yield Label("Target column  [dim](the true answers)[/]")
+                        yield Label("Target column  [dim](the true answers)[/]", id="eval-target-label")
                         yield Select([], prompt="last column", id="eval-target")
                     with Vertical(id="grp-eval-text", classes="group"):
                         yield Label("Text column")
@@ -73,7 +75,7 @@ class EvaluateScreen(Screen):
                 with Horizontal(classes="switch-row", id="row-robust"):
                     yield Switch(True, id="eval-robust")
                     yield Label("Robustness test (adds noise)")
-                yield Label("Compare with another model")
+                yield Label("Compare with another model", id="eval-other-label")
                 yield Select([], prompt="none", id="eval-other")
                 yield Button("▶ Evaluate", id="eval-go", variant="success")
                 yield Button("💾 Save report", id="eval-save", disabled=True)
@@ -92,7 +94,8 @@ class EvaluateScreen(Screen):
         self.kind = pre.get("type")
         self.query_one("#eval-title", Static).update(
             f"Evaluate [b]{self.model_name}[/b] · {self.spec.task}"
-            + (f" · {len(self.spec.class_names)} classes" if self.spec.class_names else ""))
+            + (f" · {len(self.spec.class_names)} {'labels kept aside' if is_unsupervised(self.spec.task) else 'classes'}"
+               if self.spec.class_names else ""))
         warn = ""
         if not self.ws.has_weights(self.model_name):
             warn = "[yellow]⚠ This model isn't trained yet: expect random results.[/]"
@@ -102,7 +105,12 @@ class EvaluateScreen(Screen):
         self.query_one("#eval-progress").display = False
         if not self.spec.data.get("dataset_cfg"):
             self.query_one("#eval-source", Select).value = "file"
-        self.query_one("#row-robust").display = self.spec.input_dtype == "float"
+        self.unsupervised = is_unsupervised(self.spec.task)
+        self.query_one("#row-robust").display = self.spec.input_dtype == "float" and not self.unsupervised
+        if self.unsupervised:  # no right answers: nothing to test noise or another model against
+            self.query_one("#eval-other-label").display = self.query_one("#eval-other").display = False
+            self.query_one("#eval-target-label", Label).update("Label column  [dim](optional: to check the groups)[/]")
+            self.query_one("#eval-target", Select).prompt = "none"
         others = [(r["name"], r["name"]) for r in self.ws.list_models()
                   if r["trained"] and ev.compatible(self.spec, self.ws.load_spec(r["name"]))]
         sel = self.query_one("#eval-other", Select)
@@ -120,13 +128,7 @@ class EvaluateScreen(Screen):
             hist = json.loads((self.ws.model_dir(self.model_name) / "evaluations.json").read_text())
         except (OSError, ValueError):
             hist = []
-        lines = []
-        for h in hist[-5:][::-1]:
-            score = (f"acc {h['accuracy']:.1%} · F1 {h['macro_f1']:.3f}" if "accuracy" in h else
-                     f"perplexity {h['perplexity']:.2f} · next-token acc {h['token_accuracy']:.1%}"
-                     if "perplexity" in h else
-                     f"MAE {h['mae']:.4g} · R² {h['r2']:.3f}" if h.get("r2") is not None else f"MAE {h['mae']:.4g}")
-            lines.append(f"{h['date']}  {score}")
+        lines = [f"{h['date']}  {ev.summary(h)}" for h in hist[-5:][::-1]]
         self.query_one("#eval-history", Static).update(
             ("Earlier evaluations\n" + "\n".join(lines)) if lines else "")
 
@@ -139,8 +141,11 @@ class EvaluateScreen(Screen):
         image = self.kind == "image" or (self.kind is None and len(self.spec.input_shape) == 3)
         lm = self.spec.task == "language_model"
         self.query_one("#eval-path-label", Label).update(
+            "Folder of images  [dim](sub-folders = labels, optional)[/]" if image and self.unsupervised else
             "Folder  [dim](one sub-folder per class)[/]" if image else
-            "Text file  [dim](.txt the model hasn't seen)[/]" if lm else "CSV file  [dim](with the true answers)[/]")
+            "Text file  [dim](.txt the model hasn't seen)[/]" if lm else
+            "CSV file  [dim](same columns as the training data)[/]" if self.unsupervised else
+            "CSV file  [dim](with the true answers)[/]")
         self.query_one("#eval-path", Input).placeholder = \
             "~/data/test_photos/" if image else "~/data/other_book.txt" if lm else "~/data/test.csv"
         self.query_one("#grp-eval-target").display = not image and not lm

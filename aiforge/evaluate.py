@@ -14,7 +14,7 @@ from torch import nn
 from torch.utils.data import DataLoader, Dataset, Subset, TensorDataset
 
 from . import data as datamod
-from .spec import ModelSpec
+from .spec import ModelSpec, is_unsupervised
 
 BOOTSTRAP = 200  # resamples for confidence intervals
 NOISE_LEVELS = (0.1, 0.3)  # robustness test: Gaussian noise, in units of a normalised input
@@ -41,12 +41,25 @@ class _Relabel(Dataset):
         return x, self.mapping[int(y)]
 
 
+class _Unlabelled(Dataset):
+    """The inputs only: every label is unknown (-1). For unsupervised models without kept-aside labels."""
+
+    def __init__(self, ds):
+        self.ds = ds
+
+    def __len__(self):
+        return len(self.ds)
+
+    def __getitem__(self, i):
+        return self.ds[i][0], -1
+
+
 def _unwrap(ds, i: int):
     """(base dataset, index in it) through Subset / _Relabel wrappers."""
     while True:
         if isinstance(ds, Subset):
             ds, i = ds.dataset, ds.indices[i]
-        elif isinstance(ds, _Relabel):
+        elif isinstance(ds, (_Relabel, _Unlabelled)):
             ds = ds.ds
         else:
             return ds, i
@@ -91,10 +104,13 @@ def _tabular_file(spec: ModelSpec, path: Path, target: str | None):
     missing = [f for f in feats if f not in header]
     if missing:
         raise ValueError(f"The CSV is missing the model's input columns: {', '.join(missing)}")
-    target = target or next((h for h in reversed(header) if h not in feats), None)
-    if target not in header:
+    unsup = is_unsupervised(spec.task)
+    if not unsup:
+        target = target or next((h for h in reversed(header) if h not in feats), None)
+    if (target is not None or not unsup) and target not in header:
         raise ValueError("Choose the target column (the true answers)")
-    fi, ti = [header.index(f) for f in feats], header.index(target)
+    # Unsupervised models: the labels are optional, only to check the groups (-1 = unknown).
+    fi, ti = [header.index(f) for f in feats], header.index(target) if target is not None else None
     mean, std = np.array(pre["mean"]), np.array(pre["std"])
     xs, ys, skipped = [], [], 0
     for r in rows:
@@ -109,8 +125,11 @@ def _tabular_file(spec: ModelSpec, path: Path, target: str | None):
                     vals.append(float(cats[f].index(v)))  # ValueError for unseen categories
                 else:
                     vals.append(float(v) if v != "" else float(mean[j]))
-            label = r[ti].strip()
-            y = spec.class_names.index(label) if spec.task == "classification" else float(label)
+            label = r[ti].strip() if ti is not None else ""
+            if unsup:
+                y = spec.class_names.index(label) if label in spec.class_names else -1
+            else:
+                y = spec.class_names.index(label) if spec.task == "classification" else float(label)
         except ValueError:
             skipped += 1
             continue
@@ -119,7 +138,7 @@ def _tabular_file(spec: ModelSpec, path: Path, target: str | None):
     if not xs:
         raise ValueError("No usable rows (unknown categories or labels in every row?)")
     x = torch.tensor((np.array(xs) - mean) / std, dtype=torch.float)
-    y = torch.tensor(ys) if spec.task == "classification" else torch.tensor(ys, dtype=torch.float).unsqueeze(1)
+    y = torch.tensor(ys) if spec.task != "regression" else torch.tensor(ys, dtype=torch.float).unsqueeze(1)
     note = f" ({skipped} rows skipped: unknown category/label or bad value)" if skipped else ""
     return TensorDataset(x, y), f"{path.name}: {len(xs):,} rows{note}"
 
@@ -131,6 +150,16 @@ def load_eval_data(spec: ModelSpec, data_dir: Path, source: str = "val", path: s
     pre = spec.data.get("preprocess", {})
     if spec.task == "language_model":
         return _lm_eval_data(spec, data_dir, source, path)
+    if is_unsupervised(spec.task) and source != "val" and pre.get("type") != "tabular":
+        p = Path(path).expanduser()
+        src = "image_csv" if p.is_file() else "image_folder"
+        ds, _, info = datamod.load({"source": src, "path": str(p), "target": target, "val_split": 0},
+                                   data_dir, spec)
+        # Labels kept aside: the model's own order; a label it never saw is unknown (-1).
+        if not spec.class_names or not info.class_names:
+            return _Unlabelled(ds), None, info.description, True
+        mapping = [spec.class_names.index(n) if n in spec.class_names else -1 for n in info.class_names]
+        return _Relabel(ds, mapping), None, info.description, True
     if source == "val":
         cfg = spec.data.get("dataset_cfg")
         if not cfg:
@@ -141,6 +170,8 @@ def load_eval_data(spec: ModelSpec, data_dir: Path, source: str = "val", path: s
             raise ValueError("The model was trained without a validation split (0). "
                              "Evaluate on a different file instead.")
         mapping = _class_mapping(spec, info.class_names) if spec.task == "classification" else None
+        if is_unsupervised(spec.task) and not spec.class_names:
+            va = _Unlabelled(va)  # no labels were kept aside
         if mapping:
             tr, va = _Relabel(tr, mapping), _Relabel(va, mapping)
         kind = "test set" if cfg["source"] in datamod.TORCHVISION else "validation split"
@@ -470,6 +501,8 @@ def evaluate_model(spec: ModelSpec, model: nn.Module, ds, ref_labels, descriptio
                    robustness: bool = True, other: tuple[str, ModelSpec, nn.Module] | None = None,
                    progress: Callable[[str, int, int], None] | None = None) -> dict:
     progress = progress or (lambda *a: None)
+    if is_unsupervised(spec.task):
+        return evaluate_unsupervised(spec, model, ds, description, history, progress)
     if spec.task == "language_model":
         return evaluate_language_model(spec, model, ds, ref_labels, description, device, history, other,
                                        progress)
@@ -595,9 +628,221 @@ def evaluate_model(spec: ModelSpec, model: nn.Module, ds, ref_labels, descriptio
     return rep
 
 
+# ---------------------------------------------------------------------------
+# Unsupervised models (no right answers: groups, rebuilding, unusual examples)
+# ---------------------------------------------------------------------------
+
+MAP_POINTS = 2000
+
+
+def evaluate_unsupervised(spec: ModelSpec, model: nn.Module, ds, description: str,
+                          history: list[dict] | None = None,
+                          progress: Callable[[str, int, int], None] | None = None) -> dict:
+    """Without labels there is no accuracy. Instead: how tight and separate the groups are (k-means)
+    or how much of the data survives being squeezed (PCA, autoencoder), both against a do-nothing
+    baseline; the most unusual examples; a 2-D map; and, when a label column was kept aside, how
+    well the groups match it."""
+    from . import unsupervised as un
+
+    progress = progress or (lambda *a: None)
+    limit = min(20_000, un.example_limit(spec.input_shape))
+    idx = np.arange(len(ds))
+    if len(ds) > limit:  # a random sample keeps memory and time in check
+        idx = np.sort(np.random.default_rng(0).choice(len(ds), limit, replace=False))
+    progress("Reading the data", 0, len(idx))
+    x, y = un.gather(Subset(ds, idx.tolist()), len(idx))
+    progress("Running the model", len(idx), len(idx))
+    if len(x) < 2:
+        raise ValueError("Evaluation needs at least 2 examples")
+    model.cpu().eval()
+    pre = spec.data.get("preprocess", {})
+    tabular = pre.get("type") == "tabular"
+    rep: dict = {"model": spec.name, "task": spec.task, "data": description,
+                 "date": time.strftime("%Y-%m-%d %H:%M"), "warnings": [], "n": len(x),
+                 "sampled_from": len(ds) if len(x) < len(ds) else None}
+    score = un.scores(spec, model, x).numpy()
+    labels = y.numpy().astype(int) if spec.class_names and y.dtype in (torch.int64, torch.int32) else None
+    if labels is not None and not (labels >= 0).any():
+        labels = None
+    flat = x.flatten(1)
+    spread_one = float(((flat - flat.mean(0)) ** 2).sum(1).mean())  # everything in one group
+
+    if spec.task == "clustering":
+        groups = un.assign(model, x).numpy()
+        k = model[0].centroids.shape[0]
+        sizes = np.bincount(groups, minlength=k)
+        m = {"silhouette": un.silhouette(x, torch.from_numpy(groups), max_n=MAP_POINTS),
+             "spread": float((score ** 2).mean()), "groups": k, "sizes": sizes.tolist()}
+        b = {"kind": "one big group (every example in the same group)", "spread": spread_one,
+             "silhouette": None}
+        m["spread_cut"] = 1 - m["spread"] / spread_one if spread_one > 0 else None
+        if (sizes == 0).any():
+            rep["warnings"].append(f"{int((sizes == 0).sum())} group(s) got no examples: try fewer groups (k).")
+        if sizes.max() > 0.8 * len(groups) and k > 1:
+            rep["warnings"].append("One group holds over 80% of the examples: the data may not split into "
+                                   f"{k} natural groups, or a few extreme examples pull the other centres away.")
+        if m["silhouette"] is not None and m["silhouette"] < 0.25:
+            rep["warnings"].append("The groups overlap a lot (silhouette below 0.25). Try another number of "
+                                   "groups, or check that the inputs are on comparable scales.")
+        if labels is not None:
+            known = labels >= 0
+            m["purity"] = un.purity(groups[known], labels[known])
+            m["ari"] = un.adjusted_rand(groups[known], labels[known])
+            table = np.zeros((k, len(spec.class_names)), int)
+            np.add.at(table, (groups[known], labels[known]), 1)
+            rep["crosstab"] = {"labels": spec.class_names, "rows": table.tolist()}
+        kinds = groups
+    else:
+        m = {"rebuild_error": float(score.mean()), "kept": un.variance_kept(spec, model, x)}
+        b = {"kind": "rebuild every example as the average one",
+             "rebuild_error": spread_one / flat.shape[1], "kept": 0.0}
+        last = next((r["epochs"][-1] for r in reversed(history or []) if r.get("epochs")), {})
+        if spec.task == "pca" and last.get("explained"):
+            m["explained"] = last["explained"]
+        if m["kept"] is not None and m["kept"] < 0.4:
+            rep["warnings"].append("Less than 40% of the variation survives: the model squeezes too hard. "
+                                   + ("Keep more components." if spec.task == "pca" else
+                                      "Widen the bottleneck (the narrowest layer) or train longer."))
+        if labels is not None:
+            rows = []
+            for c in np.unique(labels[labels >= 0]):
+                mask = labels == c
+                rows.append({"label": spec.class_names[c], "n": int(mask.sum()), "score": float(score[mask].mean())})
+            rep["by_label"] = sorted(rows, key=lambda r: -r["score"])
+        # Map symbols: one per label, plus one for examples whose label the model never saw.
+        kinds = np.where(labels >= 0, labels, len(spec.class_names)) if labels is not None else None
+    rep["metrics"], rep["baseline"] = m, b
+
+    order = np.argsort(-score)[:TOP_ERRORS]
+    rep["unusual"] = [{"index": int(idx[i]), "score": float(score[i]), "percentile": un.percentile(spec, float(score[i])),
+                       "label": spec.class_names[labels[i]] if labels is not None and labels[i] >= 0 else None,
+                       "group": un.group_name(int(kinds[i])) if spec.task == "clustering" else None,
+                       "example": _describe(ds, int(idx[i]), spec, flat[i].numpy() if tabular else None)}
+                      for i in order]
+    rep["score_name"] = un.SCORE_NAMES[spec.task]
+
+    # A 2-D map of (a sample of) the examples, with the most unusual ones marked.
+    pick = np.arange(len(x)) if len(x) <= MAP_POINTS else \
+        np.sort(np.random.default_rng(1).choice(len(x), MAP_POINTS, replace=False))
+    pick = np.union1d(pick, order)
+    pts = un.project_2d(un.codes(spec, model, x[torch.from_numpy(pick)]))
+    marked = np.isin(pick, order)
+    sub_kinds = kinds[pick] if kinds is not None else None
+    names = ([un.group_name(i) for i in range(m["groups"])] if spec.task == "clustering" else
+             list(spec.class_names) + (["no label"] if (labels < 0).any() else []) if labels is not None else [])
+    legend = [{"symbol": un.MAP_SYMBOLS[i % len(un.MAP_SYMBOLS)], "name": n,
+               "count": int((kinds == i).sum())} for i, n in enumerate(names)] if sub_kinds is not None else []
+    rep["map"] = {"text": un.text_map(pts, sub_kinds, highlight=marked), "legend": legend,
+                  "points": len(pick), "axes": {"pca": "component 1 → · component 2 ↑",
+                                                "autoencoder": "the code, flattened to 2-D",
+                                                "clustering": "the inputs, flattened to 2-D"}[spec.task]}
+    rep["learning"] = _learning_diagnosis(history or [], spec.task) if spec.task == "autoencoder" else None
+    if rep["learning"] and rep["learning"]["verdict"] == "overfitting":
+        rep["warnings"].append("The training history shows overfitting - see 'Learning curves'.")
+    rep["verdict"] = _unsupervised_verdict(rep)
+    return rep
+
+
+def _unsupervised_verdict(rep: dict) -> str:
+    m = rep["metrics"]
+    if rep["task"] == "clustering":
+        sil = m["silhouette"]
+        if sil is None:
+            return "⚠️ Can't judge: every example ended up in the same group."
+        if sil >= 0.5:
+            return f"✅ Clear groups: tight and well apart (silhouette {sil:.2f})."
+        if sil >= 0.25:
+            return f"👍 Real groups, with some overlap at the edges (silhouette {sil:.2f})."
+        return f"⚠️ Weak: the groups overlap a lot (silhouette {sil:.2f}). Try another number of groups."
+    kept = m["kept"] if m["kept"] is not None else 0
+    if kept >= 0.9:
+        return f"✅ Strong: keeps {kept:.0%} of the information while squeezing it."
+    if kept >= 0.7:
+        return f"👍 Good: keeps {kept:.0%} of the information."
+    if kept >= 0.4:
+        return f"⚠️ Weak: keeps only {kept:.0%} of the information."
+    return f"❌ Not useful yet: keeps only {kept:.0%} of the information."
+
+
+def _unsupervised_markdown(rep: dict) -> str:
+    m, b = rep["metrics"], rep["baseline"]
+    sample = f" (a random {rep['n']:,} of {rep['sampled_from']:,})" if rep.get("sampled_from") else ""
+    md = [f"# Evaluation: {rep['model']}", "", f"**Data:** {rep['data']}{sample} · {rep['date']}", "",
+          f"## {rep['verdict']}", ""]
+    if rep["warnings"]:
+        md += [f"- ⚠️ {w}" for w in rep["warnings"]] + [""]
+    md += ["There are no right answers to score against, so these numbers measure the *structure* the "
+           "model found, compared with a baseline that finds none.", "",
+           "## Metrics", "", "| Metric | Model | Baseline* | What it tells you |", "|---|---|---|---|"]
+    if rep["task"] == "clustering":
+        md += [f"| **Silhouette** | **{_num(m['silhouette'])}** | – | -1 to 1: how much closer each example is "
+               "to its own group than to the next one. Above 0.5 = clear groups, below 0.25 = they overlap. |",
+               f"| Spread within groups | {_num(m['spread'])} | {_num(b['spread'])} | Average squared distance "
+               "to the group's centre. Lower = tighter groups. |",
+               f"| Spread removed | {_pct(m['spread_cut'])} | 0% | How much tighter the groups are than one big group. |"]
+        if "purity" in m:
+            md += [f"| Purity | {_pct(m['purity'])} | | Share of examples whose kept-aside label is the most "
+                   "common one in their group. |",
+                   f"| Adjusted Rand index | {_num(m['ari'])} | 0 | Agreement between groups and labels: "
+                   "1 = identical, 0 = random. |"]
+        md += ["", f"*Baseline: {b['kind']}.*", "", "## The groups", "", "| Group | Examples | Share |", "|---|---|---|"]
+        total = max(1, sum(m["sizes"]))
+        md += [f"| group {i + 1} | {n:,} | {n / total:.0%} |" for i, n in enumerate(m["sizes"])]
+        if rep.get("crosstab"):
+            ct = rep["crosstab"]
+            md += ["", "## Groups vs. the labels kept aside",
+                   "The model never saw these labels. A group that holds mostly one label found that "
+                   "kind of example on its own.", "",
+                   "| Group | " + " | ".join(ct["labels"][:12]) + " |", "|---" * (min(12, len(ct["labels"])) + 1) + "|"]
+            md += [f"| group {i + 1} | " + " | ".join(str(v) for v in row[:12]) + " |" for i, row in enumerate(ct["rows"])]
+    else:
+        md += [f"| **Variation kept** | **{_pct(m['kept'])}** | {_pct(b['kept'])} | Share of the data's "
+               "variation that survives squeezing and rebuilding (R²). Higher = less information lost. |",
+               f"| Rebuild error | {_num(m['rebuild_error'])} | {_num(b['rebuild_error'])} | Average squared "
+               "difference between an example and its rebuilt version. Lower is better. |"]
+        if m.get("explained"):
+            parts = " · ".join(f"{i + 1}: {v:.1%}" for i, v in enumerate(m["explained"][:10]))
+            md += [f"| Per component | {parts} | | How much of the variation each component carries. |"]
+        md += ["", f"*Baseline: {b['kind']}.*"]
+        if rep.get("by_label"):
+            md += ["", "## Rebuild error per kept-aside label",
+                   "Labels the model rebuilds worst are the kinds of example it finds most unusual.", "",
+                   "| Label | Examples | Average rebuild error |", "|---|---|---|"]
+            md += [f"| {r['label']} | {r['n']:,} | {r['score']:.4g} |" for r in rep["by_label"][:15]]
+
+    mp = rep["map"]
+    md += ["", "## Map of the data",
+           f"Each symbol is one example ({mp['points']:,} shown), placed by {mp['axes']}. Examples that are "
+           "close together look alike to the model. ✖ marks the most unusual ones.", "",
+           "```text", mp["text"], "```"]
+    if mp["legend"]:
+        md += ["", " · ".join(f"`{l['symbol']}` {l['name']} ({l['count']:,})" for l in mp["legend"][:12])]
+
+    md += ["", f"## The {len(rep['unusual'])} most unusual examples",
+           f"Ranked by {rep['score_name']}. Look at them: they can be errors in the data, rare cases, or "
+           "exactly the oddities you are looking for.", "",
+           "| # | Example | Score | More unusual than |" + (" Group |" if rep["task"] == "clustering" else "")
+           + (" Label |" if any(u["label"] for u in rep["unusual"]) else ""),
+           "|---|---|---|---|" + ("---|" if rep["task"] == "clustering" else "")
+           + ("---|" if any(u["label"] for u in rep["unusual"]) else "")]
+    for i, u in enumerate(rep["unusual"], 1):
+        row = f"| {i} | {u['example']} | {u['score']:.4g} | {_pct(u['percentile'])} of training |"
+        if rep["task"] == "clustering":
+            row += f" {u['group']} |"
+        if any(v["label"] for v in rep["unusual"]):
+            row += f" {u['label'] or '–'} |"
+        md.append(row)
+    lr = rep.get("learning")
+    if lr:
+        md += ["", "## Learning curves", f"**{lr['verdict']}**: {lr['text']}"]
+    return "\n".join(md)
+
+
 def compatible(spec_a: ModelSpec, spec_b: ModelSpec) -> bool:
     """Can model B be run on model A's evaluation data and compared fairly?"""
     pa, pb = spec_a.data.get("preprocess", {}), spec_b.data.get("preprocess", {})
+    if is_unsupervised(spec_a.task):
+        return False  # no right answers to compare two models on
     if spec_a.task == "language_model":  # any input length works, but the token ids must mean the same
         return (spec_a.name != spec_b.name and spec_b.task == "language_model"
                 and pa.get("type") == pb.get("type") == "corpus" and pa.get("vocab") == pb.get("vocab"))
@@ -778,6 +1023,8 @@ def _num(v) -> str:
 def report_markdown(rep: dict) -> str:
     if rep["task"] == "language_model":
         return _language_model_markdown(rep)
+    if is_unsupervised(rep["task"]):
+        return _unsupervised_markdown(rep)
     m, b = rep["metrics"], rep["baseline"]
     cls = rep["task"] == "classification"
     md = [f"# Evaluation: {rep['model']}", "",
@@ -983,6 +1230,21 @@ def remember(rep: dict, model_dir: Path) -> None:
         hist = []
     m = rep["metrics"]
     keys = {"classification": ("accuracy", "macro_f1", "roc_auc"),
-            "language_model": ("perplexity", "token_accuracy")}.get(rep["task"], ("mae", "rmse", "r2"))
+            "language_model": ("perplexity", "token_accuracy"),
+            "clustering": ("silhouette", "spread"), "pca": ("kept", "rebuild_error"),
+            "autoencoder": ("kept", "rebuild_error")}.get(rep["task"], ("mae", "rmse", "r2"))
     hist.append({"date": rep["date"], "data": rep["data"], **{k: m[k] for k in keys}})
     f.write_text(json.dumps(hist[-50:], indent=2))
+
+
+def summary(h: dict) -> str:
+    """One line for a remembered evaluation (see ``remember``)."""
+    if "accuracy" in h:
+        return f"accuracy {h['accuracy']:.1%} · macro F1 {h['macro_f1']:.3f}"
+    if "perplexity" in h:
+        return f"perplexity {h['perplexity']:.2f} · next-token accuracy {h['token_accuracy']:.1%}"
+    if "silhouette" in h:
+        return f"silhouette {_num(h['silhouette'])} · spread {_num(h['spread'])}"
+    if "kept" in h:
+        return f"variation kept {_pct(h['kept'])} · rebuild error {_num(h['rebuild_error'])}"
+    return f"MAE {h['mae']:.4g}" + (f" · R² {h['r2']:.3f}" if h.get("r2") is not None else "")

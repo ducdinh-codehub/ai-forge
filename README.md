@@ -27,7 +27,8 @@ With the mouse or keyboard you can:
 3. **Fine-tune** a trained model for a new, related task
 4. **Evaluate** how good it really is
 5. **Use** it to make predictions, or let a tiny GPT **write text**
-6. **Export** it for Python, ONNX Runtime, mobile apps and more
+6. **Find structure without labels**: groups (k-means), a 2-D map (PCA) and oddities (autoencoders)
+7. **Export** it for Python, ONNX Runtime, mobile apps and more
 
 No PyTorch or Python knowledge needed. The built-in **Guide** (`g`) teaches the ML basics.
 
@@ -326,6 +327,34 @@ Excel, Parquet and Hugging Face need a few extra packages: `pipx inject aiforge-
 | ✎ Design it all yourself | Blank |
 
 You can change any layer after creating the model.
+
+### No labels? Unsupervised models
+
+When you create a model, choose **🔍 Unsupervised** instead of **🎯 Supervised**. These models need
+no answers: they find structure in your data by themselves.
+
+| You want | Template | Kind |
+|---|---|---|
+| Groups of similar rows or images | **k-means clustering** | classic algorithm: fitted in seconds |
+| A 2-D map, or fewer columns | **PCA** | classic algorithm: fitted in one step |
+| Oddities, and a map for curved shapes or images | **Autoencoder** (tables) · **Image / Conv autoencoder** | neural network: trained with epochs |
+
+- **Train:** any table or image source works (not text). The label column is optional: if you pick
+  one it is **kept aside**, never learned from, only used to check the groups. A plain folder of
+  images (no class sub-folders) is enough. For k-means and PCA the Train screen hides the settings
+  that don't apply (learning rate, batch size…) and runs on the CPU.
+- **Use:** shows an example's group (k-means) or rebuild error, and how unusual it is compared with
+  the training data (*"more unusual than 99% of the training examples"*). Batch prediction adds
+  `group` / `rebuild_error` and `unusual_percentile` columns: sort by the last one to find oddities.
+- **Evaluate:** silhouette (how clear the groups are) or variation kept (how much survives
+  squeezing), against a do-nothing baseline; a **map of the data** drawn in the terminal; the
+  10 most unusual examples; and, with kept-aside labels, how well the groups match them.
+
+New to this? Press `g` → **3. Supervised, unsup., RL** and **🔍 Unsupervised**.
+
+Not available yet: reinforcement learning (shown in the dialog as *coming soon*) and the
+*Training script* export for unsupervised models. k-means and PCA aren't fine-tuned: training them
+again on new data takes seconds.
 
 ---
 

@@ -35,6 +35,9 @@ class Explanation:
 def explain(spec: ModelSpec, model: nn.Module, raw: str) -> Explanation:
     if spec.task == "language_model":
         raise ValueError("Explanations are for classifiers and regressors - a language model writes text.")
+    if spec.task not in ("classification", "regression"):
+        raise ValueError("Explanations are for classifiers and regressors, not for models that learn "
+                         "without labels.")
     model.eval()
     pre = spec.data.get("preprocess", {})
     kind = pre.get("type") or ("image" if len(spec.input_shape) == 3 else "tabular")

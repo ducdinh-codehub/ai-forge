@@ -126,7 +126,7 @@ You give the model **inputs and their correct labels**, like the house table in 
 against the labels while it trains.
 
 Its two big question types are **classification** and **regression** (next lesson).
-**Everything you train in AIForge is supervised learning.**
+In AIForge, pick **🎯 Supervised** when you create a model.
 
 ## Unsupervised learning
 
@@ -138,6 +138,8 @@ There are **no labels**. The model looks only at the inputs and finds structure 
   information, e.g. to draw the data on a 2-D chart.
 
 The model can say *"these belong together"*, but **you** decide what each group means.
+In AIForge, pick **🔍 Unsupervised** when you create a model (see *🔍 Unsupervised: groups &
+oddities* under Model types).
 
 ## Reinforcement learning
 
@@ -159,9 +161,11 @@ Like training a dog: you don't explain the rules, you give a treat when it does 
 thing. Reinforcement learning is also one step in training chatbots like ChatGPT and Claude:
 people rate the answers, and the model learns to give the kind that rates well.
 
+AIForge doesn't train reinforcement-learning agents yet.
+
 ## Which one do I need?
 
-- You have **examples with the right answers** → **supervised** (that's AIForge).
+- You have **examples with the right answers** → **supervised**.
 - You have **data but no answers** and want to find groups or oddities → **unsupervised**.
 - You need an agent that **makes decisions step by step** and can try again and again
   → **reinforcement**.
@@ -319,6 +323,7 @@ CHOOSE_TYPE = """\
 | Pictures (photos, scans, screenshots) | 🖼 **Computer vision** | Is this a cat or a dog? · Is this leaf sick? · Which digit is this? |
 | Words, sentences, reviews, messages | 💬 **Language / NLP** | Is this review positive? · Is this message spam? · What topic is this news about? |
 | You already know which layers you want | ✎ **Build manually** | Experiments and learning |
+| Data **without answers**, and you want groups, oddities or a map | 🔍 **Unsupervised** | Which kinds of customers do we have? · Which payments look strange? |
 
 Every model type is a group of **templates**: ready-made models that are known to work for
 that kind of data. You can change any layer after you create the model.
@@ -618,6 +623,59 @@ mistakes.
 """
 
 
+UNSUPERVISED_LESSON = """\
+# 🔍 Unsupervised: groups & oddities
+
+> **In short:** no answers needed. The model looks at your examples and finds structure:
+> **groups** of similar examples, **oddities** that fit nowhere, and a **map** of the data.
+
+## Three models to choose from
+
+| Model | Kind | What it gives you | Pick it when |
+|---|---|---|---|
+| **k-means** | classic algorithm | **k groups**, and each example's group | You want to split the data into groups |
+| **PCA** | classic algorithm | **a few numbers** per example (a 2-D map with 2) | You want a quick map, or fewer columns |
+| **Autoencoder** | neural network | **oddities** and a map, for curved shapes too | Images, or data PCA can't flatten well |
+
+*Classic* algorithms are fitted in one go, in seconds, with one setting to choose. The
+autoencoder is a neural network that trains with epochs, like the supervised models.
+
+## How do they find oddities?
+
+- **k-means:** an example far from every group's centre is unusual.
+- **PCA and autoencoder:** they squeeze each example into a few numbers and **rebuild** it.
+  Typical examples are rebuilt well. Odd ones aren't: their **rebuild error** is high.
+
+```text
+ input ─▶ [ encoder ] ─▶ code (few numbers) ─▶ [ decoder ] ─▶ rebuilt input
+   └────────────── compare: a big difference = an unusual example ─────┘
+```
+
+## Your first unsupervised model
+
+1. Press `n`, choose **🔍 Unsupervised**, then **Clustering (k-means)**.
+2. Train it on the toy dataset **blobs**: four clouds of points. It finds the four groups.
+3. Press `v` (Evaluate): see the groups on a **map** and the most unusual examples.
+4. Try it on your own table. Leave the label column empty, or pick one: it is **kept aside**,
+   never used for learning, only to check if the groups match it.
+
+## Reading the results
+
+| You see | It means |
+|---|---|
+| **Silhouette** near 1 | Clear, well-separated groups |
+| **Silhouette** below 0.25 | The groups overlap: try another number of groups |
+| **Variation kept** above 90% | The few numbers keep almost everything about each example |
+| An example "more unusual than 99%" | Worth a look: a mistake in the data, a rare case, or fraud |
+
+## Tips
+
+- There is no "right" number of groups. Try a few and compare the silhouette.
+- k-means likes round groups. For moons, circles or images, try an autoencoder.
+- **You** name the groups: look at a few examples of each and decide what they have in common.
+"""
+
+
 # ---------------------------------------------------------------------------
 
 LESSONS: dict[str, tuple[str, str]] = {
@@ -634,11 +692,13 @@ LESSONS: dict[str, tuple[str, str]] = {
     "learn:vision": ("🖼 Computer vision", VISION),
     "learn:language": ("💬 Language / NLP", LANGUAGE),
     "learn:manual": ("✎ Build manually", MANUAL_LESSON),
+    "learn:unsupervised": ("🔍 Unsupervised", UNSUPERVISED_LESSON),
 }
 
 BASICS = ["learn:what", "learn:data", "learn:kinds", "learn:tasks", "learn:training",
           "learn:fitting", "learn:workflow", "learn:evaluate"]
-TYPES = ["learn:choose", "learn:tabular", "learn:vision", "learn:language", "learn:manual"]
+TYPES = ["learn:choose", "learn:tabular", "learn:vision", "learn:language", "learn:manual",
+         "learn:unsupervised"]
 
 
 def lesson_markdown(key: str) -> str:

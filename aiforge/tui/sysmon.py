@@ -47,6 +47,7 @@ class SystemPanel(Widget):
         self.specs: Specs | None = None
         self.sample: Sample | None = None
         self.device_choice = "auto"
+        self.cpu_only: str | None = None  # why this model always runs on the CPU (classic algorithms)
         self.cpu_hist: deque[float] = deque(maxlen=HISTORY)
         self.ram_hist: deque[float] = deque(maxlen=HISTORY)
         self.gpu_hist: deque[float] = deque(maxlen=HISTORY)
@@ -127,10 +128,12 @@ class SystemPanel(Widget):
         else:
             out.append("none found", style="yellow")
         out.append("\n")
-        dev_label = self._device_label()
+        dev_label = "CPU" if self.cpu_only else self._device_label()
         out.append("Training on: " if self.training else "Will train on: ", style="dim")
         out.append(dev_label, style="bold green" if "GPU" in dev_label else "bold yellow")
-        if "GPU" not in dev_label and sp.gpus and not self.training:
+        if self.cpu_only:
+            out.append(f"  ({self.cpu_only})", style="dim")
+        elif "GPU" not in dev_label and sp.gpus and not self.training:
             out.append("  ← a GPU is available: set Device to auto", style="yellow")
         elif not sp.gpus:
             out.append("  (no supported GPU - CPU training is fine for small models)", style="dim")

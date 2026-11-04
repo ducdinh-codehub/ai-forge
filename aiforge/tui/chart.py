@@ -17,6 +17,7 @@ class LineChart(Widget):
                  fmt: str = "{:.3f}", **kw):
         super().__init__(**kw)
         self.title, self.labels, self.palette, self.fmt = title, labels, colors, fmt
+        self.unit = "epoch"  # what one step along the x axis is
         self.series: list[list[float]] = [[], []]
 
     def set_data(self, *series: list[float]) -> None:
@@ -37,7 +38,7 @@ class LineChart(Widget):
         rows = h - 2
         values = [v for s in self.series for v in s]
         if rows < 2 or not values:
-            out.append("  waiting for the first epoch…", style="dim")
+            out.append(f"  waiting for the first {self.unit}…", style="dim")
             return out
         lo, hi = min(values), max(values)
         if hi - lo < 1e-12:
@@ -76,5 +77,6 @@ class LineChart(Widget):
                     out.append(" ")
             if r < rows - 1:
                 out.append("\n")
-        out.append(f"\n{' ' * axis}epoch 1{('epoch ' + str(longest)).rjust(max(0, cols - 7))}", style="dim")
+        first = f"{self.unit} 1"
+        out.append(f"\n{' ' * axis}{first}{f'{self.unit} {longest}'.rjust(max(0, cols - len(first)))}", style="dim")
         return out

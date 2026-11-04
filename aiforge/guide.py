@@ -6,8 +6,10 @@ shapes, parameter counts and settings.
 """
 from __future__ import annotations
 
+import math
+
 from .layers import REGISTRY
-from .spec import LayerInfo, ModelSpec
+from .spec import CLASSIC_TASKS, LayerInfo, ModelSpec, is_unsupervised
 
 ACTIVATIONS = {"ReLU", "GELU", "SiLU", "Tanh", "Sigmoid", "LeakyReLU"}
 
@@ -331,6 +333,71 @@ LAYER_GUIDE: dict[str, dict] = {
         tips=["During fine-tuning, freeze the backbone at first and train only the head.",
               "Use colour input (3 channels), ideally 224×224. Weights download the first time you train."],
     ),
+    "Unflatten": dict(
+        summary="Folds a flat list of numbers back into an image: `(C·H·W,) → (C, H, W)`.",
+        analogy="Cutting one long sentence back into the lines of a page.",
+        how="The opposite of **Flatten**: the numbers are re-arranged into channels, rows and columns. "
+            "Nothing is learned.",
+        settings={"channels": "Image channels: 1 for grayscale, 3 for colour.",
+                  "height": "Rows of pixels.", "width": "Columns of pixels."},
+        use="At the end of an image **autoencoder** whose decoder is made of Linear layers, so the "
+            "output has the same shape as the input image.",
+        tips=["The Linear layer before it must output exactly channels × height × width values "
+              "(e.g. 1 × 28 × 28 = 784). Auto-fit sets both for you."],
+        diagram="[ • • • • • • • • ]  ──▶  ┌─┬─┐\n                         ├─┼─┤\n                         └─┴─┘",
+    ),
+    "ConvTranspose2d": dict(
+        summary="Grows an image: the opposite of convolution + pooling.",
+        analogy="Zooming in on a thumbnail and letting an artist paint in the missing detail.",
+        how="Each input pixel is spread over a `kernel_size × kernel_size` patch of the output, "
+            "weighted by learned filters. With kernel 2 and stride 2 the image doubles in height and "
+            "width: `C×7×7 → out_channels×14×14`.",
+        settings={"out_channels": "Number of filters (feature maps) it produces.",
+                  "kernel_size": "Size of the patch each input pixel paints.",
+                  "stride": "Growth factor: 2 doubles height and width.",
+                  "padding": "Pixels trimmed from each side of the result.",
+                  "bias": "A learnable constant per filter."},
+        use="The **decoder** half of a convolutional autoencoder (and image generators), mirroring the "
+            "Conv2d + MaxPool2d layers of the encoder.",
+        tips=["Mirror the encoder: one ConvTranspose2d (kernel 2, stride 2) for each MaxPool2d.",
+              "The last one needs `out_channels` = the input's channels (1 grayscale, 3 colour)."],
+    ),
+    "KMeans": dict(
+        summary="Finds k groups of similar examples, with no labels needed. A classic algorithm, "
+                "and a whole model on its own.",
+        analogy="Placing k ice-cream stands on a beach so that everyone walks as little as possible: "
+                "each person goes to the nearest stand, and each stand moves to the middle of its crowd.",
+        how="Start with k centre points (chosen far apart, *k-means++*). Then repeat: **(1)** every "
+            "example joins its nearest centre, **(2)** each centre moves to the average of its examples. "
+            "It stops when no example changes group. The answer for a new example is its nearest centre; "
+            "the model outputs the distance to every centre.",
+        settings={"k": "How many groups to find. There is no right answer: try a few values and compare "
+                       "the **silhouette** in the Evaluate report."},
+        use="Splitting customers, products or photos into groups; a first look at any new dataset; "
+            "spotting oddities (examples far from every centre).",
+        tips=["k-means finds round, similar-sized groups. Long or nested shapes (moons, circles) need "
+              "another method, e.g. an autoencoder.",
+              "All inputs should be on comparable scales - AIForge standardises table columns for you.",
+              "Nothing is trained with gradients, so the learning rate and batch size don't apply."],
+        diagram="  ●●●        ▲▲\n ●●✚●●     ▲✚▲▲\n  ●●●       ▲▲      ✚ = a group's centre\n        ■■■\n       ■■✚■",
+    ),
+    "PCA": dict(
+        summary="Squeezes each example into a few numbers (components) that keep as much of its "
+                "variation as possible. A classic algorithm, and a whole model on its own.",
+        analogy="Photographing a 3-D object from the angle that shows the most of it: you lose a "
+                "dimension, but you can still tell the objects apart.",
+        how="PCA finds the directions in which the data varies most (the eigenvectors of its covariance "
+            "matrix). Component 1 is the direction with the most variation, component 2 the most of "
+            "what is left, and so on. An example's output is its position along each direction. "
+            "Going back from those numbers gives a *rebuilt* example; what can't be rebuilt was lost.",
+        settings={"n_components": "How many numbers to keep. 2 gives a map you can look at; more keeps "
+                                  "more detail. The report shows how much each component keeps."},
+        use="Drawing a 2-D map of the data, compressing many columns into a few before another model, "
+            "and spotting oddities (examples it rebuilds badly).",
+        tips=["PCA only finds straight directions. Curved structure needs an **autoencoder**.",
+              "If a few components keep 90%+ of the variation, the other columns are mostly redundant."],
+        diagram="  y        ╱ component 1\n  │   · ·╱·\n  │  ·· ╱·  ·\n  │ · ╱· ·\n  └──────────── x",
+    ),
 }
 
 
@@ -358,6 +425,16 @@ def describe_input(spec: ModelSpec) -> str:
 
 
 def describe_task(spec: ModelSpec, out) -> str:
+    if spec.task == "clustering":
+        k = spec.layers[0].config["k"] if spec.layers else "?"
+        return f"**puts it in one of {k} groups** it finds by itself (k-means clustering, no labels needed)"
+    if spec.task == "pca":
+        n = out[0] if out else "?"
+        return f"**squeezes it into {n} numbers** that keep as much of its variation as possible (PCA)"
+    if spec.task == "autoencoder":
+        idx = spec.bottleneck()
+        code = f" through a code of **{math.prod(spec.analyze()[idx].out_shape):,} numbers**" if idx is not None else ""
+        return f"**rebuilds it**{code}: an autoencoder, which learns the data's structure without labels"
     if spec.task == "language_model":
         n = out[-1] if out else "?"
         return (f"**predicts the next token** at every position, choosing among **{n} tokens** - "
@@ -378,6 +455,21 @@ def role(info: LayerInfo, spec: ModelSpec) -> str:
     if info.error:
         return f"⚠ {info.error}"
     last = info.index == len(spec.layers) - 1
+    if t == "KMeans":
+        return (f"compares each example with {c['k']} group centres and outputs the distance to each - "
+                "the nearest is its group. The centres are fitted, not trained (0 parameters)")
+    if t == "PCA":
+        return (f"projects the {math.prod(i):,} input values onto the {o[0]} directions of largest "
+                "variation. The directions are fitted, not trained (0 parameters)")
+    if t == "Unflatten":
+        return f"folds the {i[0]:,} numbers back into a {_shape(o)} image"
+    if t == "ConvTranspose2d":
+        return f"grows the {_shape(i[1:])} maps to {_shape(o[1:])} with {c['out_channels']} filters"
+    if spec.task == "autoencoder" and spec.bottleneck() == info.index:
+        return (f"**the bottleneck**: squeezes everything into {math.prod(o):,} numbers - the code the "
+                "decoder must rebuild the input from")
+    if last and spec.task == "autoencoder":
+        return f"outputs the rebuilt input, {_shape(o)} - the same shape as what went in"
     if t == "Linear":
         if last and spec.task == "language_model":
             return (f"turns each position's {i[-1]} features into **a score for every one of the "
@@ -460,6 +552,14 @@ def review(spec: ModelSpec) -> list[str]:
                          "the answer and writes nonsense afterwards. "
                          + ("Turn **causal** on." if l.type == "TransformerEncoder" else
                             "Turn **bidirectional** off."))
+    if spec.task in CLASSIC_TASKS:
+        return [n for n in notes if not n.startswith("⚠️ **Layers")] or [
+            "✅ A classic algorithm: nothing to tune but its one setting. Training fits it in seconds."]
+    if spec.task == "autoencoder":
+        idx = spec.bottleneck()
+        if idx is not None and math.prod(infos[idx].out_shape) >= math.prod(spec.input_shape):
+            notes.append("❌ The narrowest layer is as big as the input, so the model can learn to copy "
+                         "its input instead of finding its structure. Make the middle layer smaller.")
     if types and types[-1] in ACTIVATIONS:
         if spec.task in ("classification", "language_model"):
             kind = "a language model" if spec.task == "language_model" else "classification"
@@ -587,7 +687,28 @@ def model_markdown(spec: ModelSpec) -> str:
             md.append(f"- **Layer {i.index + 1} {i.spec.type}**: {i.params:,} ({i.params / total:.0%}) `{bar}`")
 
     md += ["", "## How it learns"]
-    if spec.task == "language_model":
+    if spec.task == "clustering":
+        md += ["**No labels needed.** k-means starts with k centre points spread over the data, then "
+               "repeats two steps: every example joins its nearest centre, and every centre moves to the "
+               "middle of its examples. It stops when no example changes group. Nothing is trained with "
+               "gradients, so it takes seconds.", "",
+               "When you **use** the model, an example belongs to its nearest centre. Being far from every "
+               "centre makes it unusual."]
+    elif spec.task == "pca":
+        md += ["**No labels needed.** PCA computes the directions in which the data varies most, in one "
+               "step (an eigen-decomposition of the covariance matrix). Each example is then described by "
+               "its position along the first few directions.", "",
+               "Going back from those numbers rebuilds the example. The **rebuild error** shows what was "
+               "lost: examples PCA rebuilds badly are unusual."]
+    elif spec.task == "autoencoder":
+        md += ["**No labels needed: the input is its own answer.** The encoder (the layers before the "
+               "bottleneck) squeezes each example into a few numbers, and the decoder (the layers after) "
+               "has to rebuild the example from them. The **mean squared error** between the input and "
+               "its rebuilt version is the loss; training makes it smaller.", "",
+               "Because the bottleneck is small, the model can't just copy: it must learn what typical "
+               "examples have in common. That's why examples it rebuilds **badly** are unusual, and why "
+               "the bottleneck values make a good map of the data."]
+    elif spec.task == "language_model":
         md += ["The model reads a stretch of text and, **at every position, guesses the next token** "
                "(a character or a word). The answer is simply the text itself shifted by one, so any "
                "text can be training data - no labels needed. The **cross-entropy loss** measures how "
@@ -651,6 +772,8 @@ def training_settings_markdown(spec: ModelSpec, values: dict, n_train: int | Non
     patience = _num(values.get("early_stop"), int) or 0
     val_split = _num(values.get("val_split"))
     opt, sched, device = values.get("optimizer"), values.get("scheduler"), values.get("device")
+    if spec.task in CLASSIC_TASKS:
+        return _classic_settings_markdown(spec, epochs, val_split)
     total = sum(i.params for i in spec.analyze())
     md = ["# Your training settings", "",
           "Training repeats one simple loop: take a **batch** of examples, let the model guess, "
@@ -739,9 +862,37 @@ def training_settings_markdown(spec: ModelSpec, values: dict, n_train: int | Non
                   f"**{frozen_params:,}** are frozen (they keep what the model already learned).")
     md.append("Loss function: " + ("**cross-entropy** - rewards giving high probability to the correct class."
                                    if spec.task == "classification" else
+                                   "**mean squared error between the input and its rebuilt version** - the "
+                                   "input is its own answer, no labels needed." if spec.task == "autoencoder" else
                                    "**cross-entropy over every position** - rewards giving high probability "
                                    "to the real next token." if spec.task == "language_model" else
                                    "**mean squared error** - the average squared distance to the true number."))
+    return "\n".join(md)
+
+
+def _classic_settings_markdown(spec: ModelSpec, rounds: int | None, val_split: float | None) -> str:
+    md = ["# Your training settings", "",
+          f"**{CLASSIC_TASKS[spec.task]}** is a classic algorithm: it is *fitted* to the data in one go, "
+          "not trained step by step with gradients. Learning rate, batch size, optimizer and precision "
+          "don't apply, so they are hidden.", ""]
+    if spec.task == "clustering":
+        md += [f"## Max rounds" + (f" = {rounds}" if rounds else ""),
+               "Each round, every example joins its nearest centre and every centre moves to the middle of "
+               "its examples. k-means stops by itself once no example changes group - usually after a "
+               "handful of rounds. The limit only matters for very large or messy data.", "",
+               "## Number of groups (k)",
+               f"This model looks for **{spec.layers[0].config['k']}** groups. Change it in the builder "
+               "(`e`). Try a few values and compare the **silhouette** in the Evaluate report.", ""]
+    else:
+        md += ["## One step",
+               f"PCA keeps **{spec.layers[0].config['n_components']}** components. It computes them in a "
+               "single step; the log shows how much of the variation each one keeps.", ""]
+    if val_split is not None:
+        md += [f"## Validation split = {val_split:g}",
+               f"{val_split:.0%} of the data is kept aside. The model is fitted without it, then checked "
+               "on it: if it fits the new examples just as well, the structure it found is real.", ""]
+    md += ["## Where it runs",
+           "On the CPU, with the data in memory. Very large datasets are sampled (the log says so)."]
     return "\n".join(md)
 
 
@@ -750,6 +901,21 @@ def diagnose(train_loss: list[float], val_loss: list[float], val_metric: list[fl
     """Plain-language reading of the loss/metric curves so far."""
     import math
 
+    if task in CLASSIC_TASKS:
+        if not train_loss:
+            return ["⏳ Start training - fitting takes a few seconds."]
+        if task == "pca":
+            kept = val_metric[-1] if val_metric else None
+            return [f"✅ Fitted. The components keep **{kept:.0%}** of the variation in validation data."
+                    if kept is not None else "✅ Fitted."]
+        sil = val_metric[-1] if val_metric else None
+        notes = [f"k-means ran {len(train_loss)} round{'s' if len(train_loss) != 1 else ''}; the spread within "
+                 "groups (left chart) falls as the centres settle."]
+        if sil is not None:
+            notes.append(f"✅ Silhouette **{sil:.2f}**: clear, well-separated groups." if sil >= 0.5 else
+                         f"👍 Silhouette **{sil:.2f}**: real groups that overlap at the edges." if sil >= 0.25 else
+                         f"⚠️ Silhouette **{sil:.2f}**: the groups overlap a lot. Try another number of groups (k).")
+        return notes
     if not train_loss:
         return ["⏳ Start training - the diagnosis appears after the first epochs."]
     if any(math.isnan(v) or math.isinf(v) for v in train_loss + val_loss):
@@ -799,6 +965,11 @@ def diagnose(train_loss: list[float], val_loss: list[float], val_metric: list[fl
             notes.append(f"🎉 Validation accuracy is **{acc:.1%}** - excellent.")
         else:
             notes.append(f"Validation accuracy is **{acc:.1%}** (random guessing would be {chance:.0%}).")
+    if task == "autoencoder" and val_metric:
+        kept = val_metric[-1]
+        notes.append(f"The model rebuilds validation examples keeping **{kept:.0%}** of their variation"
+                     + (" - excellent." if kept >= 0.9 else "." if kept >= 0.5 else
+                        ". Train longer, or widen the bottleneck if it stays low."))
     if not any(x.startswith(("⚠️", "❌")) for x in notes) and n >= 3:
         notes.insert(0, "✅ **Looks healthy:** the losses are going down.")
     return notes
@@ -812,6 +983,11 @@ def charts_markdown(train_loss, val_loss, val_metric, task: str, n_classes: int)
            "measured on the examples it learns from, the *val* line on examples it never sees.", "",
            ("**Accuracy** (right) is the share of correct answers on each set - higher is better."
             if task == "classification" else
+            "For k-means, the left chart is the **spread within groups** (average squared distance to the "
+            "group's centre) after each round, and **Silhouette** (right) shows how well separated the groups "
+            "are: -1 to 1, higher is better." if task == "clustering" else
+            "**Variation kept** (right) is the share of the data's variation that survives squeezing and "
+            "rebuilding - higher is better. The loss is the **rebuild error**." if task in ("pca", "autoencoder") else
             "**Perplexity** (right) is roughly how many tokens the model is still choosing between at "
             "each step - lower is better. It falls fast at first, then slowly." if task == "language_model" else
             "**Mean absolute error** (right) is the average size of the mistake, in the units of "

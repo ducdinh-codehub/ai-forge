@@ -9,7 +9,8 @@ from textual.screen import Screen
 from rich.markup import escape
 from textual.widgets import Button, Footer, Header, Input, Label, RichLog, Static
 
-from ..predict import input_hint, predict_batch, predict_one
+from ..predict import describe, input_hint, predict_batch, predict_one
+from ..spec import TASK_LABELS, is_unsupervised
 
 BAR = 30
 
@@ -42,7 +43,7 @@ class PredictScreen(Screen):
             with Vertical(id="batch-section"):
                 yield Static("Batch prediction", classes="section-title")
                 yield Static("A CSV (one input per row) or a folder of images → a CSV with a prediction column.",
-                             classes="hint")
+                             classes="hint", id="batch-hint")
                 with Horizontal(classes="input-row"):
                     yield Input(id="batch-src", placeholder="~/data/new_rows.csv  or  ~/photos/")
                     yield Button("📂 Browse", id="browse-batch")
@@ -56,8 +57,9 @@ class PredictScreen(Screen):
         self.spec, self.model, note = ws.load_model(self.model_name)
         self.model.eval()
         self.query_one("#predict-title", Static).update(
-            f"Use [b]{self.model_name}[/b] · {self.spec.task}"
-            + (f" · {len(self.spec.class_names)} classes" if self.spec.class_names else ""))
+            f"Use [b]{self.model_name}[/b] · {TASK_LABELS.get(self.spec.task, self.spec.task)}"
+            + (f" · {len(self.spec.class_names)} {'labels kept aside' if is_unsupervised(self.spec.task) else 'classes'}"
+               if self.spec.class_names else ""))
         if not ws.has_weights(self.model_name):
             self.query_one("#predict-warn", Static).update(
                 "[yellow]⚠ This model has not been trained - predictions are random.[/]")
@@ -72,7 +74,14 @@ class PredictScreen(Screen):
         self.is_lm = self.spec.task == "language_model"
         self.query_one("#gen-row").display = self.is_lm
         self.query_one("#batch-section").display = not self.is_lm
-        self.query_one("#explain").display = not self.is_lm
+        self.unsupervised = is_unsupervised(self.spec.task)
+        self.query_one("#explain").display = not self.is_lm and not self.unsupervised
+        if self.unsupervised:
+            self.query_one("#go", Button).label = "Check"
+            what = "its group" if self.spec.task == "clustering" else "its rebuild error"
+            self.query_one("#batch-hint", Static).update(
+                f"A CSV (one input per row) or a folder of images → a CSV with {what} and how unusual "
+                "each one is (sort it by unusual_percentile to find the oddities).")
         if self.is_lm:
             self.query_one("#raw", Input).placeholder = "e.g. Twinkle, twinkle  (Enter = write)"
             self.query_one("#go", Button).label = "✎ Write"
@@ -88,9 +97,11 @@ class PredictScreen(Screen):
             return
         box = self.query_one("#result", Static)
         try:
+            if self.unsupervised:
+                return box.update(self._describe(describe(self.spec, self.model, raw)))
             res = predict_one(self.spec, self.model, raw)
         except Exception as e:  # noqa: BLE001
-            box.update(f"[red]{e}[/]")
+            box.update(f"[red]{escape(str(e))}[/]")
             return
         if self.spec.task == "classification":
             lines = [f"[b]→ {res[0][0]}[/b]  ({res[0][1]:.1%} confident)", ""]
@@ -101,13 +112,30 @@ class PredictScreen(Screen):
         else:
             box.update("\n".join(f"[b]{label}: {v:.6g}[/b]" for label, v in res))
 
+    def _describe(self, d: dict) -> str:
+        """Group or rebuild error, how unusual the input is, and its compressed code."""
+        if self.spec.task == "clustering":
+            label, dist = d["pairs"][0]
+            lines = [f"[b]→ {label}[/b]  (distance {dist:.4g} to its centre)", d["verdict"], ""]
+            far = max(v for _, v in d["pairs"]) or 1
+            for name, v in d["pairs"][:8]:
+                bar = "█" * max(1, round((1 - v / far) * BAR))
+                lines.append(f"  {name:<10} [cyan]{bar:<{BAR}}[/] distance {v:.4g}")
+            lines.append("[dim]  longer bar = closer to that group's centre[/]")
+            return "\n".join(lines)
+        name = "component" if self.spec.task == "pca" else "code"
+        code = " · ".join(f"{v:.3g}" for v in d["code"][:8]) + (" …" if len(d["code"]) > 8 else "")
+        return "\n".join([f"[b]rebuild error {d['score']:.4g}[/b]", d["verdict"], "",
+                          f"{name}{'s' if len(d['code']) > 1 else ''}: {code}",
+                          "[dim]what the model squeezed this input into[/]"])
+
     def action_explain(self) -> None:
         self._explain()
 
     @on(Button.Pressed, "#explain")
     def _explain(self) -> None:
         raw = self.query_one("#raw", Input).value
-        if self.is_lm or not raw.strip():
+        if self.is_lm or self.unsupervised or not raw.strip():
             return
         self._predict()  # show the answer that is being explained
         box = self.query_one("#explanation", Static)

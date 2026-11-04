@@ -6,6 +6,22 @@ and versions follow [Semantic Versioning](https://semver.org/) (still `0.x`: any
 ## [Unreleased]
 
 ### Added
+- **Unsupervised learning: models that need no labels.** The *New model* dialog now starts with
+  the learning style: 🎯 Supervised, 🔍 Unsupervised (🎮 Reinforcement is shown as coming soon).
+  - **k-means clustering** and **PCA**: classic algorithms, fitted in seconds on the CPU (new
+    *Classic ML* layers `KMeans` and `PCA`). k-means starts from several k-means++ trials, so it
+    doesn't get stuck with two centres in one group.
+  - **Autoencoders** for tables and 28×28 images (new layers `Unflatten` and `ConvTranspose2d`),
+    trained with epochs like the other neural networks.
+  - Train on any table or image source; the label column is optional and only **kept aside** to
+    check the groups. A plain folder of images works too.
+  - **Use** tells an example's group or rebuild error and how unusual it is compared with the
+    training data; batch prediction adds an `unusual_percentile` column.
+  - **Evaluate** reports the silhouette or the variation kept against a baseline, draws a map of
+    the data in the terminal, lists the most unusual examples and, with kept-aside labels, compares
+    groups and labels (purity, adjusted Rand index).
+  - New Guide lesson *🔍 Unsupervised: groups & oddities* and encyclopedia entries for the new layers.
+  - The command line, Compare and the web API handle the new models too.
 - **Guide:** new ML-basics lesson *3. Three ways to learn* explains supervised, unsupervised and
   reinforcement learning in plain words, with everyday examples and a "which one do I need?"
   checklist. The lessons after it are renumbered (4–8).

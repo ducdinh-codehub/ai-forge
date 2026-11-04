@@ -27,6 +27,9 @@ def last_run_config(history: list[dict]) -> TrainConfig:
 
 
 def training_script(spec: ModelSpec, cfg: TrainConfig) -> str:
+    if spec.task not in ("classification", "regression", "language_model"):
+        raise ValueError("The training script covers supervised models for now. Export the weights, "
+                         "the PyTorch code, TorchScript or ONNX instead.")
     data_cfg = spec.data.get("dataset_cfg")
     if not data_cfg:
         raise ValueError("Train the model in AIForge first: the script reproduces its last training run.")
