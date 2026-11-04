@@ -12,7 +12,7 @@ from torch import nn
 
 from . import data as datamod
 from .data import DataInfo
-from .spec import ModelSpec, Workspace, safe_name
+from .spec import CLASSIC_TASKS, ModelSpec, Workspace, safe_name
 from .trainer import (CHECKPOINT, Trainer, TrainConfig, data_mismatch, fit_spec_to_data, load_checkpoint,
                       reset_head)
 
@@ -157,6 +157,8 @@ def train_model(ws: Workspace, name: str, data: LoadedData, cfg: TrainConfig, *,
             note += ", output layer re-initialised for the new classes"
     else:
         model, note = spec.build(), "fresh random weights"
+    if spec.task in CLASSIC_TASKS:
+        note = "fitted from scratch"
     spec.apply_freeze(model)
     on_log(f"{'Fine-tuning' if finetune else 'Training'} '{name}'"
            f"{f' → {save_as!r}' if finetune else ''} ({note})")

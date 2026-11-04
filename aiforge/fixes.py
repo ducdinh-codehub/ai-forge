@@ -9,7 +9,7 @@ import math
 from dataclasses import dataclass
 
 from .data import DataInfo
-from .spec import LayerSpec, ModelSpec, from_template
+from .spec import LayerSpec, ModelSpec, from_template, is_unsupervised
 from .trainer import data_mismatch, fit_spec_to_data
 
 BIG_MODEL = 5_000_000
@@ -116,6 +116,8 @@ def suggest(spec: ModelSpec, info: DataInfo) -> list[Fix]:
     before = base.total_params() if not any(i.error for i in base.analyze()) else spec.total_params()
     fixes: list[Fix] = []
     infos = base.analyze()
+    if is_unsupervised(info.task):  # nothing to insert: offer a template that fits, or the builder
+        infos = []
 
     # 1. Insert a reducer (Flatten / GlobalAvgPool / SequencePool) where shapes go wrong.
     if infos and not any(i.error for i in infos) and len(infos[-1].out_shape) > 1:
@@ -181,6 +183,16 @@ def suggest(spec: ModelSpec, info: DataInfo) -> list[Fix]:
 
 def _templates_for(info: DataInfo) -> list[tuple[str, str]]:
     s = info.input_shape
+    if info.task == "clustering":
+        return [("k-means clustering (4 groups)", "A plain k-means model: one KMeans layer.")]
+    if info.task == "pca":
+        return [("PCA (2 components, for a 2-D map)", "A plain PCA model: one PCA layer.")]
+    if info.task == "autoencoder":
+        if len(s) == 1:
+            return [("Autoencoder (tables, 2-number code)", "Squeezes each row through 2 numbers and rebuilds it.")]
+        return [("Conv autoencoder (28×28 grayscale)", "Convolutions in, transposed convolutions out."),
+                ("Image autoencoder (28×28 grayscale, e.g. MNIST)",
+                 "Flattens the image, squeezes it through 32 numbers and rebuilds it; works for any size.")]
     if info.task == "language_model":
         return [("Tiny GPT (characters, fast)", "A small GPT: a causal Transformer that learns to write."),
                 ("LSTM language model (characters)", "Reads the text in order with a memory; simpler.")]

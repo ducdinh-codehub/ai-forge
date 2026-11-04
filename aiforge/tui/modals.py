@@ -7,7 +7,7 @@ from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Label, Select, Static
 
-from ..spec import MANUAL, MODEL_TYPES, TEMPLATES, from_template, safe_name
+from ..spec import CLASSIC_TASKS, LEARNING_STYLES, MANUAL, TEMPLATES, from_template, safe_name
 
 
 def browse_into(screen, target: Input, **kwargs) -> None:
@@ -141,10 +141,27 @@ class TextDialog(Dialog):
             self.dismiss(v)
 
 
+STYLE_CARDS = {  # learning style -> (card label, hint under the cards)
+    "supervised": ("🎯 Supervised\n[dim]learns from labels[/]",
+                   "Learns from examples with the right answers (labels): classify or predict."),
+    "unsupervised": ("🔍 Unsupervised\n[dim]no answers needed[/]",
+                     "Finds structure by itself: groups, oddities and a map of your data. "
+                     "Labels are optional, only to check the result."),
+    "reinforcement": ("🎮 Reinforcement\n[dim]coming soon[/]", ""),
+}
+
+
 class NewModelDialog(Dialog):
+    DEFAULT_CSS = """
+    NewModelDialog #styles { height: auto; margin-top: 1; }
+    NewModelDialog .style-card { width: 1fr; height: 4; min-width: 10; margin-right: 1; }
+    NewModelDialog .style-card:last-of-type { margin-right: 0; }
+    """
+
     def __init__(self, ws):
         super().__init__()
         self.ws = ws
+        self.style = "supervised"
 
     def compose(self) -> ComposeResult:
         with Vertical():
@@ -152,9 +169,16 @@ class NewModelDialog(Dialog):
             yield Static("Pick a starting point - you can change every layer afterwards.", classes="hint")
             yield Label("Model name")
             yield Input(self.ws.unique_name("my-model"), id="name")
+            yield Label("How will it learn?  [dim](Guide → lesson 3 explains the difference)[/]")
+            with Horizontal(id="styles"):
+                for key, (label, _) in STYLE_CARDS.items():
+                    yield Button(label, id=f"style-{key}", classes="style-card",
+                                 variant="primary" if key == self.style else "default",
+                                 disabled=key not in LEARNING_STYLES)
+            yield Static("", id="style-hint", classes="hint")
             yield Label("Model type")
-            yield Select([(t, t) for t in MODEL_TYPES], value=next(iter(MODEL_TYPES)),
-                         allow_blank=False, id="type")
+            types = LEARNING_STYLES[self.style]
+            yield Select([(t, t) for t in types], value=next(iter(types)), allow_blank=False, id="type")
             yield Label("Start from", id="template-label")
             yield Select([], allow_blank=True, id="template")
             yield Static("", id="preview", classes="hint")
@@ -162,6 +186,22 @@ class NewModelDialog(Dialog):
             yield self.buttons("Create & open builder")
 
     def on_mount(self) -> None:
+        self._fill_types()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        key = (event.button.id or "").removeprefix("style-")
+        if key in LEARNING_STYLES and key != self.style:
+            self.style = key
+            for k in STYLE_CARDS:
+                self.query_one(f"#style-{k}", Button).variant = "primary" if k == key else "default"
+            self._fill_types()
+
+    def _fill_types(self) -> None:
+        types = LEARNING_STYLES[self.style]
+        sel = self.query_one("#type", Select)
+        sel.set_options([(t, t) for t in types])
+        sel.value = next(iter(types))
+        self.query_one("#style-hint", Static).update(STYLE_CARDS[self.style][1])
         self._fill_templates()
 
     def on_select_changed(self, event: Select.Changed) -> None:
@@ -170,9 +210,14 @@ class NewModelDialog(Dialog):
         else:
             self._preview()
 
+    def _kind(self) -> str:
+        types = LEARNING_STYLES[self.style]
+        value = self.query_one("#type", Select).value
+        return value if value in types else next(iter(types))
+
     def _fill_templates(self) -> None:
-        kind = self.query_one("#type", Select).value
-        names = MODEL_TYPES[kind]
+        kind = self._kind()
+        names = LEARNING_STYLES[self.style][kind]
         template = self.query_one("#template", Select)
         template.set_options([(t, t) for t in names])
         template.value = names[0]
@@ -183,13 +228,14 @@ class NewModelDialog(Dialog):
 
     def _template(self) -> str:
         value = self.query_one("#template", Select).value
-        return value if value in TEMPLATES else MODEL_TYPES[self.query_one("#type", Select).value][0]
+        return value if value in TEMPLATES else LEARNING_STYLES[self.style][self._kind()][0]
 
     def _preview(self) -> None:
         spec = from_template(self._template(), "x")
         layers = " → ".join(l.type for l in spec.layers) or "(empty - add layers yourself)"
-        self.query_one("#preview", Static).update(
-            f"Input {tuple(spec.input_shape)} → {layers}\n{spec.total_params():,} parameters")
+        size = ("a classic algorithm: fitted in seconds, no parameters to train"
+                if spec.task in CLASSIC_TASKS else f"{spec.total_params():,} parameters")
+        self.query_one("#preview", Static).update(f"Input {tuple(spec.input_shape)} → {layers}\n{size}")
 
     def submit(self) -> None:
         name = safe_name(self.query_one("#name", Input).value)

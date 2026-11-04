@@ -8,7 +8,7 @@ import torch
 from torch import nn
 
 from .data import IMAGE_EXT, prepare_input, read_table
-from .spec import ModelSpec
+from .spec import ModelSpec, is_unsupervised
 
 
 def show_token(token: str) -> str:
@@ -18,7 +18,8 @@ def show_token(token: str) -> str:
 
 @torch.no_grad()
 def predict_one(spec: ModelSpec, model: nn.Module, raw: str, top_k: int = 5) -> list[tuple[str, float]]:
-    """Class probabilities, regression values, or (language models) the likeliest next tokens."""
+    """Class probabilities, regression values, (language models) the likeliest next tokens, or
+    (unsupervised models) the nearest groups / the rebuild error and code, see ``describe``."""
     model.eval()
     pre = spec.data.get("preprocess", {})
     if spec.task == "language_model":
@@ -28,6 +29,9 @@ def predict_one(spec: ModelSpec, model: nn.Module, raw: str, top_k: int = 5) -> 
 
         vals, idx = next_token_probs(model, pre, raw).topk(min(top_k, len(pre["vocab"]) - 1))
         return [(show_token(pre["vocab"][i]), float(v)) for v, i in zip(vals.tolist(), idx.tolist())]
+    if is_unsupervised(spec.task):
+        pairs = describe(spec, model, raw)["pairs"]
+        return pairs[:top_k] if spec.task == "clustering" else pairs
     out = model(prepare_input(spec, raw))[0]
     if spec.task == "classification":
         probs = out.softmax(0)
@@ -37,6 +41,31 @@ def predict_one(spec: ModelSpec, model: nn.Module, raw: str, top_k: int = 5) -> 
         return [(names[i], float(v)) for v, i in zip(vals.tolist(), idx.tolist())]
     out = out * pre.get("target_std", 1.0) + pre.get("target_mean", 0.0)
     return [(f"output {i}" if len(out) > 1 else "prediction", float(v)) for i, v in enumerate(out.tolist())]
+
+
+@torch.no_grad()
+def describe(spec: ModelSpec, model: nn.Module, raw: str) -> dict:
+    """What an unsupervised model makes of one input: its unusualness score (and how it compares
+    with the training data), its group (k-means) and its compressed code (PCA, autoencoder).
+    ``pairs`` lists the numbers as (label, value): the nearest groups first, or the error first."""
+    from . import unsupervised as un
+
+    model.eval()
+    x = prepare_input(spec, raw)
+    score = float(un.scores(spec, model, x)[0])
+    res = {"score": score, "score_name": un.SCORE_NAMES[spec.task], "percentile": un.percentile(spec, score),
+           "verdict": un.verdict(spec, score)}
+    if spec.task == "clustering":
+        dist = model(x)[0]
+        order = dist.argsort().tolist()
+        res["group"] = order[0]
+        res["pairs"] = [(un.group_name(i), float(dist[i])) for i in order]
+    else:
+        code = un.codes(spec, model, x)[0].tolist()
+        res["code"] = code
+        name = "component" if spec.task == "pca" else "code"
+        res["pairs"] = [("rebuild error", score)] + [(f"{name} {i + 1}", v) for i, v in enumerate(code[:8])]
+    return res
 
 
 def input_hint(spec: ModelSpec) -> str:
@@ -84,6 +113,8 @@ def predict_batch(spec: ModelSpec, model: nn.Module, src: str, dst: str | None =
             inputs = [(r, ",".join(r[i] for i in ix)) for r in rows]
     if not inputs:
         raise ValueError("Nothing to predict (no rows / images found)")
+    if is_unsupervised(spec.task):
+        return _describe_batch(spec, model, inputs, header, p, dst)
     is_cls = spec.task == "classification"
     for ident, raw in inputs:
         res = predict_one(spec, model, raw, top_k=1)
@@ -95,5 +126,32 @@ def predict_batch(spec: ModelSpec, model: nn.Module, src: str, dst: str | None =
     with out.open("w", newline="") as f:
         w = csv.writer(f)
         w.writerow(header + (["prediction", "confidence"] if is_cls else ["prediction"]))
+        w.writerows(rows_out)
+    return out, len(rows_out)
+
+
+def _output_path(p: Path, dst: str | None) -> Path:
+    out = Path(dst).expanduser() if dst else (p if p.is_dir() else p.parent) / f"{p.stem}_predictions.csv"
+    return out / "predictions.csv" if out.is_dir() else out
+
+
+def _describe_batch(spec: ModelSpec, model: nn.Module, inputs, header, p: Path, dst) -> tuple[Path, int]:
+    """Unsupervised models: group and/or unusualness of every row or image, in the input's order.
+    The percentile says how unusual it is (0.99 = more unusual than 99% of the training data)."""
+    from . import unsupervised as un
+
+    cluster = spec.task == "clustering"
+    rows_out = []
+    for ident, raw in inputs:
+        d = describe(spec, model, raw)
+        base = ident if isinstance(ident, list) else [ident]
+        pct = "" if d["percentile"] is None else f"{d['percentile']:.3f}"
+        rows_out.append(base + ([un.group_name(d["group"]), f"{d['score']:.6g}", pct] if cluster
+                                else [f"{d['score']:.6g}", pct]))
+    out = _output_path(p, dst)
+    with out.open("w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(header + (["group", "distance", "unusual_percentile"] if cluster
+                             else ["rebuild_error", "unusual_percentile"]))
         w.writerows(rows_out)
     return out, len(rows_out)

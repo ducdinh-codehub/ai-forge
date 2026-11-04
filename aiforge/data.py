@@ -62,7 +62,27 @@ class DataInfo:
         return (self.n_outputs,)
 
 
+MAX_KEPT_LABELS = 50  # an unsupervised model keeps a label column aside only if it has this few values
+
+
 def load(cfg: dict, data_dir: Path, spec=None) -> tuple[Dataset, Dataset, DataInfo]:
+    """Train and validation sets for ``spec``. An unsupervised model (no labels needed) gets the
+    same inputs; a label column, if any, is only kept aside to check the groups it finds."""
+    from .spec import is_unsupervised
+
+    if spec is not None and is_unsupervised(spec.task):
+        if cfg["source"] in ("csv_text", "text_corpus"):
+            raise ValueError("Unsupervised models in AIForge learn from tables and images, not text.")
+        cfg = {**cfg, "task": spec.task}
+        tr, va, info = _load(cfg, data_dir, spec)
+        if info.input_dtype != "float":
+            raise ValueError("Unsupervised models in AIForge learn from tables and images, not text.")
+        info.task = spec.task
+        return tr, va, info
+    return _load(cfg, data_dir, spec)
+
+
+def _load(cfg: dict, data_dir: Path, spec=None) -> tuple[Dataset, Dataset, DataInfo]:
     src = cfg["source"]
     val_split = float(cfg.get("val_split", 0.2))
     if src == "synthetic":
@@ -74,7 +94,8 @@ def load(cfg: dict, data_dir: Path, spec=None) -> tuple[Dataset, Dataset, DataIn
         path = Path(cfg["path"]).expanduser()
         ds, info = _text_table(*read_table(path), path.name, cfg, spec)
     elif src == "image_folder":
-        ds, info = _image_folder(Path(cfg["path"]).expanduser(), spec)
+        ds, info = _image_folder(Path(cfg["path"]).expanduser(), spec, labels_needed=cfg.get("task") is None
+                                 or cfg["task"] in ("classification", "regression"))
     elif src == "image_csv":
         ds, info = _image_csv(Path(cfg["path"]).expanduser(), cfg.get("target") or None,
                               cfg.get("image_column") or None, spec)
@@ -229,10 +250,14 @@ def _is_num(v: str) -> bool:
 
 
 def _table(header: list[str], rows: list[list[str]], name: str, target: str | None, task: str | None):
-    target = target or header[-1]
-    if target not in header:
+    from .spec import is_unsupervised
+
+    unsupervised = task is not None and is_unsupervised(task)
+    if not unsupervised:
+        target = target or header[-1]
+    if target is not None and target not in header:
         raise ValueError(f"Target column '{target}' not in CSV columns: {', '.join(header)}")
-    ti = header.index(target)
+    ti = header.index(target) if target is not None else None
     rows = [r for r in rows if len(r) == len(header)]
     feats = [h for i, h in enumerate(header) if i != ti]
     cols = {h: [r[header.index(h)].strip() for r in rows] for h in header}
@@ -253,6 +278,10 @@ def _table(header: list[str], rows: list[list[str]], name: str, target: str | No
     x = torch.tensor(matrix, dtype=torch.float).T
     mean, std = x.mean(0), x.std(0).clamp_min(1e-8)
     x = (x - mean) / std
+    pre = {"type": "tabular", "features": feats, "mean": mean.tolist(), "std": std.tolist(),
+           "categorical": categorical}
+    if unsupervised:
+        return _unlabelled_table(x, cols.get(target), pre, name, len(rows), target, task)
 
     yv = cols[target]
     numeric_target = all(_is_num(v) for v in yv)
@@ -269,11 +298,27 @@ def _table(header: list[str], rows: list[list[str]], name: str, target: str | No
         classes = sorted(set(yv), key=lambda v: (float(v) if numeric_target else 0, v))
         y = torch.tensor([classes.index(v) for v in yv])
     info = DataInfo([len(feats)], "float", task, classes, {
-        "type": "tabular", "features": feats, "mean": mean.tolist(), "std": std.tolist(),
-        "categorical": categorical, **({"target_mean": y_mean, "target_std": y_std}
-                                       if task == "regression" else {})},
+        **pre, **({"target_mean": y_mean, "target_std": y_std} if task == "regression" else {})},
         description=f"{name}: {len(rows)} rows, {len(feats)} features, target '{target}'")
     return TensorDataset(x, y), info
+
+
+def _unlabelled_table(x: torch.Tensor, labels: list[str] | None, pre: dict, name: str, n_rows: int,
+                      target: str | None, task: str):
+    """Every column is an input. A chosen label column is left out of the inputs and kept aside as
+    class names, to check the groups the model finds (too many distinct values: just left out)."""
+    desc = f"{name}: {n_rows} rows, {x.shape[1]} features, no labels used"
+    classes: list[str] = []
+    y = torch.zeros(len(x), dtype=torch.long)
+    if labels is not None:
+        values = sorted(set(labels), key=lambda v: (float(v) if all(_is_num(u) for u in labels) else 0, v))
+        if len(values) <= MAX_KEPT_LABELS:
+            classes = values
+            y = torch.tensor([values.index(v) for v in labels])
+            desc += f" ('{target}' kept aside to check the groups)"
+        else:
+            desc += f" ('{target}' left out: {len(values)} different values)"
+    return TensorDataset(x, y), DataInfo([x.shape[1]], "float", task, classes, pre, description=desc)
 
 
 # ---------------------------------------------------------------------------
@@ -518,20 +563,28 @@ def _huggingface(cfg: dict, spec):
     return _table(header, rows, title, target, cfg.get("task") or None)
 
 
-def _image_folder(root: Path, spec):
+def _image_folder(root: Path, spec, labels_needed: bool = True):
+    """One sub-folder per class. Without labels (unsupervised models) a plain folder of images
+    works too: then every image below it is used, and sub-folder names only serve as labels kept
+    aside to check the groups."""
     if not root.is_dir():
         raise FileNotFoundError(f"Folder not found: {root}")
     classes = sorted(d.name for d in root.iterdir() if d.is_dir() and not d.name.startswith("."))
-    if len(classes) < 2:
+    if len(classes) < 2 and labels_needed:
         raise ValueError("Image folder needs at least 2 sub-folders (one per class)")
-    items = [(p, ci) for ci, c in enumerate(classes) for p in sorted((root / c).rglob("*"))
-             if p.suffix.lower() in IMAGE_EXT]
+    if len(classes) < 2:
+        classes = []
+        items = [(p, 0) for p in sorted(root.rglob("*")) if p.suffix.lower() in IMAGE_EXT]
+    else:
+        items = [(p, ci) for ci, c in enumerate(classes) for p in sorted((root / c).rglob("*"))
+                 if p.suffix.lower() in IMAGE_EXT]
     if not items:
         raise ValueError("No images found (.png/.jpg/...)")
     pre = _image_pre(spec)
     ds = _ImageFiles(items, _image_transform(pre))
     info = DataInfo([pre["channels"], *pre["size"]], "float", "classification", classes, pre,
-                    description=f"{root.name}: {len(items)} images, {len(classes)} classes")
+                    description=f"{root.name}: {len(items)} images"
+                                + (f", {len(classes)} classes" if classes else ""))
     return ds, info
 
 

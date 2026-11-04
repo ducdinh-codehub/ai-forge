@@ -9,7 +9,7 @@ from textual.screen import Screen
 from textual.widgets import Button, DataTable, Footer, Header, Static
 
 from .. import model_io
-from ..spec import safe_name
+from ..spec import CLASSIC_TASKS, safe_name, style_badge
 from .banner import Banner
 from .modals import ConfirmDialog, ImportDialog, NewModelDialog, TextDialog
 
@@ -135,7 +135,7 @@ class HomeScreen(Screen):
         t.clear()
         rows = self.ws.list_models()
         for r in rows:
-            t.add_row(r["name"], r["task"], str(r["layers"]), f"{r['params']:,}",
+            t.add_row(r["name"], f"{style_badge(r['task'])} {r['task']}", str(r["layers"]), f"{r['params']:,}",
                       "[green]trained[/]" if r["trained"] else "[dim]none[/]",
                       str(r["epochs"] or "-"), r["modified"], key=r["name"])
         self.query_one("#empty-hint").display = not rows
@@ -168,7 +168,9 @@ class HomeScreen(Screen):
                 last = run["epochs"][-1] if run.get("epochs") else {}
                 metric = (f"val acc {last['val_acc']:.1%}" if "val_acc" in last else
                           f"val MAE {last['val_mae']:.4g}" if "val_mae" in last else
-                          f"val perplexity {last['val_ppl']:.2f}" if "val_ppl" in last else "")
+                          f"val perplexity {last['val_ppl']:.2f}" if "val_ppl" in last else
+                          f"variation kept {last['val_kept']:.1%}" if last.get("val_kept") is not None else
+                          f"silhouette {last['val_silhouette']:.3f}" if last.get("val_silhouette") is not None else "")
                 kind = run.get("kind", "train")
                 text.append(f" {i}. {run['started']}  {kind:<9} {len(run.get('epochs', []))} ep  "
                             f"loss {last.get('val_loss', last.get('train_loss', 0)):.4f}  {metric}"
@@ -176,12 +178,10 @@ class HomeScreen(Screen):
         elif not self.ws.has_weights(name):
             text += ["", "[yellow]Not trained yet - press [b]t[/b] to train.[/]"]
         if evals := self._evaluations(name):
+            from ..evaluate import summary
+
             h = evals[-1]
-            score = (f"accuracy {h['accuracy']:.1%} · macro F1 {h['macro_f1']:.3f}" if "accuracy" in h
-                     else f"perplexity {h['perplexity']:.2f} · next-token accuracy {h['token_accuracy']:.1%}"
-                     if "perplexity" in h
-                     else f"MAE {h['mae']:.4g}" + (f" · R² {h['r2']:.3f}" if h.get("r2") is not None else ""))
-            text += ["", "[b]Last evaluation[/b]", f" {h['date']}  {score}  [dim]{h['data']}[/]"]
+            text += ["", "[b]Last evaluation[/b]", f" {h['date']}  {summary(h)}  [dim]{h['data']}[/]"]
         box.update("\n".join(text))
 
     def _evaluations(self, name: str) -> list[dict]:
@@ -227,6 +227,10 @@ class HomeScreen(Screen):
 
     def action_finetune(self) -> None:
         if name := self._need_model():
+            if self.ws.load_spec(name).task in CLASSIC_TASKS:
+                self.notify("k-means and PCA are re-fitted from scratch in seconds, so there is nothing "
+                            "to fine-tune. Press t to train it on the new data instead.", timeout=8)
+                return
             if not self.ws.has_weights(name):
                 self.notify("This model has no trained weights yet - fine-tuning starts from random "
                             "weights. Train it (or load weights) first for real transfer.",
