@@ -30,6 +30,9 @@ class TrainConfig:
     max_samples: int = 0  # 0 = use everything
     precision: str = "auto"  # auto | fp32 | bf16 | fp16 (see amp_dtype)
     workers: int = -1  # background data-loading processes, -1 = auto (see data.loader_workers)
+    # Reinforcement learning only (epochs = episodes there, see rl.train_agent):
+    gamma: float = 0.99  # discount: how much rewards later on count compared with one now
+    explore: float = 0.5  # share of the episodes over which random exploration fades out
 
 
 def pick_device(pref: str = "auto") -> torch.device:
@@ -227,6 +230,10 @@ class Trainer:
         in ``spec.data["unsupervised"]``, so the caller saves it with the weights."""
         if self.spec.task in CLASSIC_TASKS:
             return self._run_classic()
+        if self.spec.task == "reinforcement":
+            from .rl import train_agent
+
+            return train_agent(self)
         run = self._run_network(resume)
         if self.spec.task == "autoencoder" and run["epochs"]:
             self._store_reference()

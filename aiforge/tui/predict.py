@@ -7,20 +7,28 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import Screen
 from rich.markup import escape
-from textual.widgets import Button, Footer, Header, Input, Label, RichLog, Static
+from textual.widgets import Button, Footer, Header, Input, Label, RichLog, Select, Static
 
 from ..predict import describe, input_hint, predict_batch, predict_one
-from ..spec import TASK_LABELS, is_unsupervised
+from ..spec import TASK_LABELS, is_reinforcement, is_unsupervised
+from .evaluate import _names_word
 
 BAR = 30
 
 
 class PredictScreen(Screen):
-    BINDINGS = [Binding("escape", "app.pop_screen", "Back"), Binding("ctrl+e", "explain", "Explain")]
+    BINDINGS = [Binding("escape", "app.pop_screen", "Back"), Binding("ctrl+e", "explain", "Explain"),
+                # Agents: play an episode yourself (ignored for other models)
+                Binding("up", "human('up')", "You: up", show=False),
+                Binding("down", "human('down')", "You: down", show=False),
+                Binding("left", "human('left')", "You: left", show=False),
+                Binding("right", "human('right')", "You: right", show=False)]
+    SPEEDS = {"slow": 0.6, "normal": 0.25, "fast": 0.06}
 
     def __init__(self, name: str):
         super().__init__()
         self.model_name = name
+        self.agent = False
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -28,7 +36,17 @@ class PredictScreen(Screen):
             yield Static("", id="predict-title", classes="section-title")
             yield Static("", id="predict-warn")
             yield Label("", id="hint")
-            with Horizontal(classes="input-row"):
+            with Vertical(id="play-section"):  # agents: watch it play (or play yourself)
+                with Horizontal(classes="input-row"):
+                    yield Button("▶ Play", id="play", variant="success")
+                    yield Button("⏭ Step", id="step")
+                    yield Button("↻ New episode", id="new-episode")
+                    yield Select([(k, k) for k in self.SPEEDS], value="normal", allow_blank=False, id="speed")
+                with Horizontal(id="play-row"):
+                    yield Static("", id="board")
+                    yield Static("", id="scores")
+                yield Static("", id="play-status")
+            with Horizontal(classes="input-row", id="single-row"):
                 yield Input(id="raw", placeholder="type an input and press Enter")
                 yield Button("📂 Browse", id="browse-raw")
                 yield Button("Predict", id="go", variant="primary")
@@ -58,7 +76,7 @@ class PredictScreen(Screen):
         self.model.eval()
         self.query_one("#predict-title", Static).update(
             f"Use [b]{self.model_name}[/b] · {TASK_LABELS.get(self.spec.task, self.spec.task)}"
-            + (f" · {len(self.spec.class_names)} {'labels kept aside' if is_unsupervised(self.spec.task) else 'classes'}"
+            + (f" · {len(self.spec.class_names)} {_names_word(self.spec.task)}"
                if self.spec.class_names else ""))
         if not ws.has_weights(self.model_name):
             self.query_one("#predict-warn", Static).update(
@@ -85,6 +103,10 @@ class PredictScreen(Screen):
         if self.is_lm:
             self.query_one("#raw", Input).placeholder = "e.g. Twinkle, twinkle  (Enter = write)"
             self.query_one("#go", Button).label = "✎ Write"
+        self.query_one("#play-section").display = False
+        if is_reinforcement(self.spec.task):
+            self._setup_agent()
+            return
         self.query_one("#raw", Input).focus()
 
     @on(Input.Submitted, "#raw")
@@ -111,6 +133,104 @@ class PredictScreen(Screen):
             box.update("\n".join(lines))
         else:
             box.update("\n".join(f"[b]{label}: {v:.6g}[/b]" for label, v in res))
+
+    # -- agents ------------------------------------------------------------------
+
+    def _setup_agent(self) -> None:
+        from .. import rl
+
+        self.agent = True
+        for wid in ("#single-row", "#gen-row", "#batch-section", "#result", "#explanation", "#predict-log"):
+            self.query_one(wid).display = False
+        self.query_one("#play-section").display = True
+        self.env = rl.make_env(self.spec.data.get("preprocess") or self.spec.data.get("env") or {})
+        keys = "↑ ↓ ← →" if self.env.name == "gridworld" else "← →"
+        self.query_one("#hint", Label).update(f"Watch the agent play, or press {keys} to play yourself.")
+        if self.app.ws.has_weights(self.model_name) and self.spec.data.get("preprocess"):  # else: a warning
+            self.query_one("#predict-warn", Static).update(f"[dim]{self.env.describe()}[/]")
+        self.timer = self.set_interval(self.SPEEDS["normal"], self._tick, pause=True)
+        self.playing = False
+        self._new_episode()
+        self.query_one("#play", Button).focus()
+
+    def _new_episode(self) -> None:
+        self.obs, self.total, self.steps, self.done, self.who = self.env.reset(), 0.0, 0, False, set()
+        self._draw("A new episode: press ▶ Play or ⏭ Step.")
+
+    def _draw(self, status: str) -> None:
+        from rich.markup import escape
+
+        from .. import rl
+
+        self.query_one("#board", Static).update(escape(self.env.render(path=self.done)))
+        q = rl.q_values(self.model, self.obs)
+        lo, hi = float(q.min()), float(q.max())
+        lines = ["[b]How the agent rates each action now[/b]  [dim](higher = better; it picks →)[/]"]
+        for i in q.argsort(descending=True).tolist():
+            bar = "█" * max(1, round((float(q[i]) - lo) / ((hi - lo) or 1) * 20))
+            mark = "[b]→[/b]" if float(q[i]) == hi else " "
+            lines.append(f"{mark} {self.env.arrows[i]} {self.env.actions[i]:<11}[cyan]{bar:<20}[/] {float(q[i]):7.3g}")
+        self.query_one("#scores", Static).update("\n".join(lines))
+        self.query_one("#play-status", Static).update(
+            f"step {self.steps} · total reward [b]{self.total:.3g}[/b]   {status}")
+
+    def _act(self, action: int, who: str) -> None:
+        if self.done:
+            self._new_episode()
+        s = self.env.step(action)
+        self.obs, self.total, self.steps = s.obs, self.total + s.reward, self.steps + 1
+        self.who.add(who)
+        self.done = s.done
+        status = f"{'🤖 agent' if who == 'agent' else '🙂 you'}: {self.env.actions[action]} ({s.reward:+.3g})"
+        if s.done:
+            self._pause()
+            player = "The agent" if self.who == {"agent"} else "You" if self.who == {"you"} else "Together you"
+            status = f"🏁 {player} {s.event} · reward {self.total:.3g} in {self.steps} steps. ↻ for another try."
+        self._draw(status)
+
+    def _tick(self) -> None:
+        from .. import rl
+
+        self._act(int(rl.q_values(self.model, self.obs).argmax()), "agent")
+
+    def _pause(self) -> None:
+        self.timer.pause()
+        self.playing = False
+        self.query_one("#play", Button).label = "▶ Play"
+
+    @on(Button.Pressed, "#play")
+    def _play(self) -> None:
+        if self.playing:
+            return self._pause()
+        if self.done:
+            self._new_episode()
+        self.timer.resume()
+        self.playing = True
+        self.query_one("#play", Button).label = "⏸ Pause"
+
+    @on(Button.Pressed, "#step")
+    def _step(self) -> None:
+        self._tick()
+
+    @on(Button.Pressed, "#new-episode")
+    def _restart(self) -> None:
+        self._pause()
+        self._new_episode()
+
+    @on(Select.Changed, "#speed")
+    def _speed(self, event: Select.Changed) -> None:
+        if not self.agent:
+            return
+        self.timer.stop()
+        self.timer = self.set_interval(self.SPEEDS[str(event.value)], self._tick, pause=not self.playing)
+
+    def action_human(self, key: str) -> None:
+        if not self.agent:
+            return
+        if key not in self.env.actions and not (self.env.name == "cartpole" and key in ("left", "right")):
+            return
+        self._pause()
+        self._act(self.env.actions.index(key) if key in self.env.actions else ["left", "right"].index(key), "you")
 
     def _describe(self, d: dict) -> str:
         """Group or rebuild error, how unusual the input is, and its compressed code."""

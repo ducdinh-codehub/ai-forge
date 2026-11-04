@@ -66,6 +66,12 @@ Screen { background: $background; }
 /* Scoped to the screens: the Home buttons share these ids and must not get the padding. */
 PredictScreen #predict, ExportScreen #export { padding: 0 2; }
 #gen-row { height: auto; margin-top: 1; }
+#play-section { height: auto; }
+#play-section #speed { width: 16; margin-left: 1; }
+#play-row { height: auto; margin-top: 1; }
+#board { width: auto; min-width: 30; padding: 1 2; background: $boost; }
+#scores { width: 1fr; padding: 1 2; }
+#play-status { height: auto; padding: 0 2; }
 #gen-row Label { margin: 1 1 0 0; }
 #gen-row Input { width: 12; margin-right: 2; }
 #batch-section { height: auto; }

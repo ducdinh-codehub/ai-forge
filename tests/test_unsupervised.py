@@ -282,7 +282,7 @@ def test_new_model_dialog_and_train_screen(tmp_path):
         async with app.run_test(size=(140, 50)) as pilot:
             await app.push_screen(NewModelDialog(ws), lambda spec: created.setdefault("spec", spec))
             await pilot.pause()
-            assert app.screen.query_one("#style-reinforcement").disabled
+            assert not app.screen.query_one("#style-reinforcement").disabled
             await pilot.click("#style-unsupervised")
             await pilot.pause()
             await pilot.click("#ok")

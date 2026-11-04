@@ -38,6 +38,10 @@ Find out how good the model **really** is, on examples it never trained on.
 """
 
 
+def _names_word(task: str) -> str:
+    return "labels kept aside" if is_unsupervised(task) else "actions" if task == "reinforcement" else "classes"
+
+
 class EvaluateScreen(Screen):
     BINDINGS = [Binding("escape", "app.pop_screen", "Back"),
                 Binding("ctrl+r", "run", "Evaluate", priority=True)]
@@ -46,7 +50,7 @@ class EvaluateScreen(Screen):
         super().__init__()
         self.model_name = name
         self.report: dict | None = None
-        self.unsupervised = False
+        self.unsupervised = self.agent = False
 
     @property
     def ws(self):
@@ -56,7 +60,10 @@ class EvaluateScreen(Screen):
         yield Header()
         with Horizontal(id="eval-main"):
             with VerticalScroll(id="eval-config"):
-                yield Static("① Data", classes="section-title")
+                yield Static("① Data", classes="section-title", id="eval-data-title")
+                with Vertical(id="grp-eval-episodes", classes="group"):
+                    yield Label("Test episodes  [dim](played without exploring)[/]")
+                    yield Input("100", id="eval-episodes", type="integer")
                 yield Select([("Validation / test data from training", "val"),
                               ("A different file / folder", "file")], value="val", allow_blank=False,
                              id="eval-source")
@@ -94,7 +101,7 @@ class EvaluateScreen(Screen):
         self.kind = pre.get("type")
         self.query_one("#eval-title", Static).update(
             f"Evaluate [b]{self.model_name}[/b] · {self.spec.task}"
-            + (f" · {len(self.spec.class_names)} {'labels kept aside' if is_unsupervised(self.spec.task) else 'classes'}"
+            + (f" · {len(self.spec.class_names)} {_names_word(self.spec.task)}"
                if self.spec.class_names else ""))
         warn = ""
         if not self.ws.has_weights(self.model_name):
@@ -106,7 +113,14 @@ class EvaluateScreen(Screen):
         if not self.spec.data.get("dataset_cfg"):
             self.query_one("#eval-source", Select).value = "file"
         self.unsupervised = is_unsupervised(self.spec.task)
-        self.query_one("#row-robust").display = self.spec.input_dtype == "float" and not self.unsupervised
+        self.agent = self.spec.task == "reinforcement"
+        self.query_one("#grp-eval-episodes").display = self.agent
+        if self.agent:  # it plays in its environment: no data to choose, no right answers to compare
+            self.query_one("#eval-data-title", Static).update("① Episodes")
+            for wid in ("#eval-source", "#grp-eval-file", "#row-robust", "#eval-other-label", "#eval-other"):
+                self.query_one(wid).display = False
+        self.query_one("#row-robust").display = (self.spec.input_dtype == "float" and not self.unsupervised
+                                                 and not self.agent)
         if self.unsupervised:  # no right answers: nothing to test noise or another model against
             self.query_one("#eval-other-label").display = self.query_one("#eval-other").display = False
             self.query_one("#eval-target-label", Label).update("Label column  [dim](optional: to check the groups)[/]")
@@ -136,7 +150,7 @@ class EvaluateScreen(Screen):
 
     @on(Select.Changed, "#eval-source")
     def _update_fields(self) -> None:
-        file = self.query_one("#eval-source", Select).value == "file"
+        file = self.query_one("#eval-source", Select).value == "file" and not self.agent
         self.query_one("#grp-eval-file").display = file
         image = self.kind == "image" or (self.kind is None and len(self.spec.input_shape) == 3)
         lm = self.spec.task == "language_model"
@@ -198,7 +212,14 @@ class EvaluateScreen(Screen):
                 "path": self.query_one("#eval-path", Input).value.strip(),
                 "target": self._value("#eval-target"), "text_column": self._value("#eval-text"),
                 "robust": self.query_one("#eval-robust", Switch).value, "other": self._value("#eval-other")}
-        if opts["source"] == "file" and not opts["path"]:
+        try:
+            opts["episodes"] = int(self.query_one("#eval-episodes", Input).value or 100)
+        except ValueError:
+            opts["episodes"] = 0
+        if self.agent and not 1 <= opts["episodes"] <= 10_000:
+            self.notify("Test episodes must be a whole number from 1 to 10,000.", severity="error")
+            return
+        if opts["source"] == "file" and not opts["path"] and not self.agent:
             self.notify("Choose a file or folder to evaluate on.", severity="error")
             return
         self.query_one("#eval-go", Button).disabled = True
@@ -216,6 +237,12 @@ class EvaluateScreen(Screen):
 
         try:
             spec, model, _ = self.ws.load_model(self.model_name)
+            if self.agent:
+                rep = ev.evaluate_agent(spec, model, opts["episodes"], self.ws.load_history(self.model_name),
+                                        progress=progress)
+                ev.remember(rep, self.ws.model_dir(self.model_name))
+                self.app.call_from_thread(self._done, rep, None)
+                return
             ds, ref, desc, orig = ev.load_eval_data(spec, self.ws.data_dir, opts["source"], opts["path"],
                                                     opts["target"], opts["text_column"])
             other = None

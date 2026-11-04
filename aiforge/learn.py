@@ -161,7 +161,8 @@ Like training a dog: you don't explain the rules, you give a treat when it does 
 thing. Reinforcement learning is also one step in training chatbots like ChatGPT and Claude:
 people rate the answers, and the model learns to give the kind that rates well.
 
-AIForge doesn't train reinforcement-learning agents yet.
+In AIForge, pick **🎮 Reinforcement** when you create a model (see *🎮 Reinforcement: agents*
+under Model types).
 
 ## Which one do I need?
 
@@ -324,6 +325,7 @@ CHOOSE_TYPE = """\
 | Words, sentences, reviews, messages | 💬 **Language / NLP** | Is this review positive? · Is this message spam? · What topic is this news about? |
 | You already know which layers you want | ✎ **Build manually** | Experiments and learning |
 | Data **without answers**, and you want groups, oddities or a map | 🔍 **Unsupervised** | Which kinds of customers do we have? · Which payments look strange? |
+| No data at all: an agent should **learn to act** by trying | 🎮 **Reinforcement** | Find the way to the goal · Keep a pole balanced |
 
 Every model type is a group of **templates**: ready-made models that are known to work for
 that kind of data. You can change any layer after you create the model.
@@ -676,6 +678,69 @@ autoencoder is a neural network that trains with epochs, like the supervised mod
 """
 
 
+REINFORCEMENT_LESSON = """\
+# 🎮 Reinforcement: agents
+
+> **In short:** no dataset. An **agent** tries actions in an **environment**, gets **rewards**,
+> and learns by itself which actions pay off.
+
+## The loop
+
+```text
+          ┌──────── action (↑ ↓ ← →) ────────┐
+          │                                  ▼
+      [ agent ]                       [ environment ]
+          ▲                                  │
+          └──── what it sees now + reward ───┘
+```
+
+One attempt from start to finish is an **episode**. The agent plays hundreds of them.
+
+## Two worlds to learn in
+
+| Environment | The agent sees | It can | Rewards |
+|---|---|---|---|
+| 🧭 **GridWorld** | where it is, the goal 🏁 and the traps 🔥 | step ↑ ↓ ← → | +10 goal · −5 trap · −0.1 per step |
+| 🎢 **CartPole** | the cart's position and speed, the pole's angle and spin | push left or right | +1 for every step the pole stays up |
+
+## How the agent learns (DQN)
+
+The model gives every action a **score**: the total reward it expects if it takes that action
+now. At first the scores are nonsense, so the agent mostly acts **at random** to explore. After
+each step it fixes its scores a little: *the score of what I did should be the reward I got, plus
+the best score of where I ended up*. Slowly, good actions get high scores, and the agent picks
+them.
+
+It's how you learn a new video game: press buttons, see what happens, remember what worked.
+
+## Your first agent
+
+Prefer to be guided? Press `Ctrl+P` and pick **Take the agent tour**: it highlights each button,
+one step at a time.
+
+1. Press `n`, choose **🎮 Reinforcement**, then **GridWorld**.
+2. Press `t` and **Set up environment**. The preview shows the grid.
+3. Click **▶ Start**. Watch **Reward per episode** climb as random moves turn into a plan.
+4. Press `Esc`, then `p` (Use) and **▶ Play**: watch the agent walk to the goal. Try the arrow
+   keys to play yourself, and compare.
+
+## Settings that matter
+
+| Setting | Meaning | Start with |
+|---|---|---|
+| **Episodes** | How many attempts | 300 (GridWorld) · 300–500 (CartPole) |
+| **Discount γ** | How much future rewards count | 0.9–0.95 (small grid) · 0.99 (CartPole) |
+| **Explore for** | Share of the run spent trying random actions | 50% |
+
+## Tips
+
+- The reward curve is **noisy**: look at the average line. AIForge tests the agent every 10
+  episodes and keeps the **best** version.
+- If the reward rises and then collapses, lower the learning rate.
+- **Random maps** (GridWorld setting) are much harder than one fixed map: give it more episodes.
+"""
+
+
 # ---------------------------------------------------------------------------
 
 LESSONS: dict[str, tuple[str, str]] = {
@@ -693,12 +758,13 @@ LESSONS: dict[str, tuple[str, str]] = {
     "learn:language": ("💬 Language / NLP", LANGUAGE),
     "learn:manual": ("✎ Build manually", MANUAL_LESSON),
     "learn:unsupervised": ("🔍 Unsupervised", UNSUPERVISED_LESSON),
+    "learn:reinforcement": ("🎮 Reinforcement", REINFORCEMENT_LESSON),
 }
 
 BASICS = ["learn:what", "learn:data", "learn:kinds", "learn:tasks", "learn:training",
           "learn:fitting", "learn:workflow", "learn:evaluate"]
 TYPES = ["learn:choose", "learn:tabular", "learn:vision", "learn:language", "learn:manual",
-         "learn:unsupervised"]
+         "learn:unsupervised", "learn:reinforcement"]
 
 
 def lesson_markdown(key: str) -> str:

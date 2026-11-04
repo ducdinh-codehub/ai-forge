@@ -183,6 +183,9 @@ def suggest(spec: ModelSpec, info: DataInfo) -> list[Fix]:
 
 def _templates_for(info: DataInfo) -> list[tuple[str, str]]:
     s = info.input_shape
+    if info.task == "reinforcement":
+        name = "CartPole agent (DQN)" if info.preprocess.get("env") == "cartpole" else "GridWorld agent (DQN)"
+        return [(name, "A small network that scores each action: the standard DQN agent.")]
     if info.task == "clustering":
         return [("k-means clustering (4 groups)", "A plain k-means model: one KMeans layer.")]
     if info.task == "pca":

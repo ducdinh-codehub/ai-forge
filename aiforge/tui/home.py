@@ -170,11 +170,13 @@ class HomeScreen(Screen):
                           f"val MAE {last['val_mae']:.4g}" if "val_mae" in last else
                           f"val perplexity {last['val_ppl']:.2f}" if "val_ppl" in last else
                           f"variation kept {last['val_kept']:.1%}" if last.get("val_kept") is not None else
-                          f"silhouette {last['val_silhouette']:.3f}" if last.get("val_silhouette") is not None else "")
+                          f"silhouette {last['val_silhouette']:.3f}" if last.get("val_silhouette") is not None else
+                          f"tested reward {run['best_score']:.3g}" if "reward" in last and run.get("best_score") is not None
+                          else "")
                 kind = run.get("kind", "train")
-                text.append(f" {i}. {run['started']}  {kind:<9} {len(run.get('epochs', []))} ep  "
-                            f"loss {last.get('val_loss', last.get('train_loss', 0)):.4f}  {metric}"
-                            f"  [dim]{run.get('dataset', '')}[/]")
+                size = (f"{len(run.get('epochs', []))} episodes" if "reward" in last else
+                        f"{len(run.get('epochs', []))} ep  loss {last.get('val_loss', last.get('train_loss', 0)):.4f}")
+                text.append(f" {i}. {run['started']}  {kind:<9} {size}  {metric}  [dim]{run.get('dataset', '')}[/]")
         elif not self.ws.has_weights(name):
             text += ["", "[yellow]Not trained yet - press [b]t[/b] to train.[/]"]
         if evals := self._evaluations(name):

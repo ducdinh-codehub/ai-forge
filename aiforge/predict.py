@@ -8,7 +8,7 @@ import torch
 from torch import nn
 
 from .data import IMAGE_EXT, prepare_input, read_table
-from .spec import ModelSpec, is_unsupervised
+from .spec import ModelSpec, is_reinforcement, is_unsupervised
 
 
 def show_token(token: str) -> str:
@@ -29,6 +29,11 @@ def predict_one(spec: ModelSpec, model: nn.Module, raw: str, top_k: int = 5) -> 
 
         vals, idx = next_token_probs(model, pre, raw).topk(min(top_k, len(pre["vocab"]) - 1))
         return [(show_token(pre["vocab"][i]), float(v)) for v, i in zip(vals.tolist(), idx.tolist())]
+    if is_reinforcement(spec.task):  # an observation in, every action's score out (best first)
+        q = model(prepare_input(spec, raw))[0]
+        names = spec.class_names or [f"action {i}" for i in range(len(q))]
+        order = q.argsort(descending=True).tolist()[:top_k]
+        return [(names[i], float(q[i])) for i in order]
     if is_unsupervised(spec.task):
         pairs = describe(spec, model, raw)["pairs"]
         return pairs[:top_k] if spec.task == "clustering" else pairs
@@ -75,6 +80,9 @@ def input_hint(spec: ModelSpec) -> str:
         return "Path to an image file (png/jpg)"
     if kind == "text":
         return "A sentence / paragraph of text"
+    if kind == "env":
+        return (f"{spec.input_shape[0]} comma-separated numbers: what the agent observes. Easier: "
+                "watch it play on the Use screen (or 'aiforge play').")
     if kind == "corpus" or spec.task == "language_model":
         return "The start of a text (a prompt) - the model writes what comes next. Leave empty to let it begin."
     feats = pre.get("features")
@@ -90,6 +98,8 @@ def predict_batch(spec: ModelSpec, model: nn.Module, src: str, dst: str | None =
     """Predict every row of a CSV (tabular/text) or every image in a folder; write a CSV."""
     if spec.task == "language_model":
         raise ValueError("Batch prediction is for classifiers and regressors - a language model writes text.")
+    if is_reinforcement(spec.task):
+        raise ValueError("An agent acts in its environment instead: watch it play, or evaluate it.")
     p = Path(src.strip().strip("'\"")).expanduser()
     pre = spec.data.get("preprocess", {})
     rows_out: list[list[str]] = []

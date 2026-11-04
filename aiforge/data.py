@@ -51,7 +51,8 @@ class DataInfo:
     def n_outputs(self) -> int:
         if self.task == "language_model":
             return len(self.preprocess["vocab"])
-        return len(self.class_names) if self.task == "classification" else 1
+        # An agent outputs one score per action; the actions take the place of class names.
+        return len(self.class_names) if self.task in ("classification", "reinforcement") else 1
 
     @property
     def output_shape(self) -> tuple[int, ...]:
@@ -68,8 +69,12 @@ MAX_KEPT_LABELS = 50  # an unsupervised model keeps a label column aside only if
 def load(cfg: dict, data_dir: Path, spec=None) -> tuple[Dataset, Dataset, DataInfo]:
     """Train and validation sets for ``spec``. An unsupervised model (no labels needed) gets the
     same inputs; a label column, if any, is only kept aside to check the groups it finds."""
-    from .spec import is_unsupervised
+    from .spec import is_reinforcement, is_unsupervised
 
+    if cfg["source"] == "env" or (spec is not None and is_reinforcement(spec.task)):
+        if cfg["source"] != "env":
+            raise ValueError("A reinforcement-learning agent learns from an environment, not a dataset.")
+        return [], [], environment(cfg)
     if spec is not None and is_unsupervised(spec.task):
         if cfg["source"] in ("csv_text", "text_corpus"):
             raise ValueError("Unsupervised models in AIForge learn from tables and images, not text.")
@@ -80,6 +85,17 @@ def load(cfg: dict, data_dir: Path, spec=None) -> tuple[Dataset, Dataset, DataIn
         info.task = spec.task
         return tr, va, info
     return _load(cfg, data_dir, spec)
+
+
+def environment(cfg: dict) -> DataInfo:
+    """An agent's 'data': the environment it plays in. It observes ``obs_size`` numbers and picks
+    one of the actions, which take the place of class names."""
+    from . import rl
+
+    pre = rl.env_cfg(cfg)
+    env = rl.make_env(pre)
+    return DataInfo([env.obs_size], "float", "reinforcement", list(env.actions), pre,
+                    description=env.describe())
 
 
 def _load(cfg: dict, data_dir: Path, spec=None) -> tuple[Dataset, Dataset, DataInfo]:
