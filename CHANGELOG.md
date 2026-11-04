@@ -5,6 +5,13 @@ and versions follow [Semantic Versioning](https://semver.org/) (still `0.x`: any
 
 ## [Unreleased]
 
+### Added
+- **One-line installer**, for people who don't code: one command in Terminal (macOS, Linux) or
+  PowerShell (Windows) installs uv, a private Python and AIForge, and adds an AIForge icon that
+  opens the app in a big enough window. No admin rights; running it again updates; `--uninstall`
+  removes it and keeps your models. On Linux without an NVIDIA GPU it picks the small CPU build of
+  PyTorch. Tested on clean Ubuntu, macOS and Windows machines in CI.
+
 ## [0.2.3] - 2026-11-04
 
 ### Added

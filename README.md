@@ -60,8 +60,42 @@ on Linux, or about 1 GB with the [CPU-only build](#cpu-only-install-linux-withou
 of at least **120 × 35**. A GPU is optional: NVIDIA (CUDA) and Apple Silicon (MPS) are used
 automatically.
 
+### Easiest: one command (no Python needed)
+
+Open **Terminal** (macOS, Linux) or **PowerShell** (Windows), paste one line and press Enter:
+
 ```bash
-pipx install aiforge-studio      # recommended (or: pip install aiforge-studio)
+# macOS and Linux
+curl -LsSf https://raw.githubusercontent.com/ducdinh-codehub/ai-forge/main/install.sh | sh
+```
+
+```powershell
+# Windows (PowerShell)
+irm https://raw.githubusercontent.com/ducdinh-codehub/ai-forge/main/install.ps1 | iex
+```
+
+Then open **AIForge** like any app: from Applications/Launchpad (macOS), the app menu (Linux), or
+the Start Menu and Desktop (Windows). The first install takes a few minutes: it downloads Python
+and PyTorch (about 200 MB to 1 GB). Run the same line again to update.
+
+It installs for you only: no admin password, and no system files are changed. It installs
+[uv](https://docs.astral.sh/uv/), a private copy of Python and AIForge, then adds the icon.
+Read the script first if you like: [install.sh](install.sh) · [install.ps1](install.ps1).
+
+**Uninstall** (your saved models in `~/AIForge` are kept):
+
+```bash
+curl -LsSf https://raw.githubusercontent.com/ducdinh-codehub/ai-forge/main/install.sh | sh -s -- --uninstall
+```
+
+```powershell
+$env:AIFORGE_UNINSTALL = 1; irm https://raw.githubusercontent.com/ducdinh-codehub/ai-forge/main/install.ps1 | iex
+```
+
+### With pipx or pip (if you already use Python)
+
+```bash
+pipx install aiforge-studio      # or: pip install aiforge-studio
 aiforge                          # start the app
 ```
 

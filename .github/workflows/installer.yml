@@ -1,0 +1,75 @@
+name: Installer
+
+# The one-line installers (install.sh, install.ps1) on clean machines: install the published
+# package, check the command and the icon, then uninstall and check everything is gone.
+on:
+  pull_request:
+    paths: ["install.sh", "install.ps1", ".github/workflows/installer.yml"]
+  push:
+    branches: [main]
+    paths: ["install.sh", "install.ps1", ".github/workflows/installer.yml"]
+  workflow_dispatch:
+
+jobs:
+  unix:
+    name: install.sh · ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install (piped, like the README's one-liner)
+        run: cat install.sh | sh
+      - name: The command works
+        run: |
+          bin="$(~/.local/bin/uv tool dir --bin 2>/dev/null || uv tool dir --bin)"
+          "$bin/aiforge" --version
+      - name: The icon exists
+        run: |
+          if [ "$RUNNER_OS" = macOS ]; then
+            test -x ~/Applications/AIForge.app/Contents/MacOS/AIForge
+            plutil -lint ~/Applications/AIForge.app/Contents/Info.plist
+          else
+            grep -q '^Exec=' ~/.local/share/applications/aiforge.desktop
+          fi
+      - name: Linux without an NVIDIA GPU gets the CPU build of PyTorch
+        if: runner.os == 'Linux'
+        run: ~/.local/share/uv/tools/aiforge-studio/bin/python -c "import torch; assert torch.version.cuda is None, torch.__version__; print(torch.__version__)"
+      - name: Uninstall removes it
+        run: |
+          cat install.sh | sh -s -- --uninstall
+          test ! -e ~/Applications/AIForge.app
+          test ! -e ~/.local/share/applications/aiforge.desktop
+          bin="$(~/.local/bin/uv tool dir --bin 2>/dev/null || uv tool dir --bin)"
+          test ! -e "$bin/aiforge"
+
+  windows:
+    name: install.ps1 · windows-latest
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install (piped, like the README's one-liner)
+        shell: pwsh
+        run: Get-Content -Raw install.ps1 | Invoke-Expression
+      - name: The command and the shortcuts work
+        shell: pwsh
+        run: |
+          $uv = (Get-Command uv -ErrorAction SilentlyContinue).Source
+          if (-not $uv) { $uv = "$env:USERPROFILE\.local\bin\uv.exe" }
+          $bin = (& $uv tool dir --bin).Trim()
+          & "$bin\aiforge.exe" --version
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          $menu = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\AIForge.lnk"
+          $desk = Join-Path ([Environment]::GetFolderPath("Desktop")) "AIForge.lnk"
+          if (-not ((Test-Path $menu) -and (Test-Path $desk))) { throw "A shortcut is missing" }
+          $link = (New-Object -ComObject WScript.Shell).CreateShortcut($menu)
+          if (-not (Test-Path $link.TargetPath)) { throw "The shortcut points nowhere: $($link.TargetPath)" }
+      - name: Uninstall removes it
+        shell: pwsh
+        run: |
+          $env:AIFORGE_UNINSTALL = 1
+          Get-Content -Raw install.ps1 | Invoke-Expression
+          $menu = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\AIForge.lnk"
+          if (Test-Path $menu) { throw "The Start Menu shortcut is still there" }
