@@ -200,3 +200,29 @@ def test_a_famous_dataset_from_the_hub_brings_its_label_column(tmp_path):
             assert dialog.query_one("#data").value.endswith("house_prices.csv")
 
     asyncio.run(scenario())
+
+
+def test_every_setting_is_explained_with_the_reason_for_its_value():
+    p = plan("predict house prices", str(EXAMPLES_DIR / "house_prices.csv"))
+    text = "\n".join(p.settings)
+    for name, value in (("Epochs", 60), ("Batch size", 32), ("Learning rate", "0.001"), ("Early stop", 8)):
+        assert f"{name} {value}" in text
+    assert text.count("Why") == 3
+    assert "13 corrections per pass" in text  # 400 training rows (20% kept aside) in batches of 32
+    assert "Training settings" in p.summary()
+    photos = plan("tell the objects apart", "cifar10")
+    assert "Why 0.001" in "\n".join(photos.settings)
+    assert "fitted" in plan("find 3 groups of fruit", str(EXAMPLES_DIR / "fruit_size.csv")).settings[0]
+    assert plan("balance a pole").train == {"epochs": 300}
+
+
+def test_the_guide_lesson_shows_the_settings_the_wizard_really_picks():
+    from aiforge.learn import BASICS, LESSONS, lesson_markdown
+    from aiforge.wizard import _settings
+
+    assert LESSONS["learn:settings"][0].startswith("6.") and "learn:settings" in BASICS
+    lesson = lesson_markdown("learn:settings")
+    for kind, n in (("table", 500), ("table", 5000), ("table", 50000), ("transfer", 100),
+                    ("language_model", 0)):
+        cfg, _ = _settings(n, kind)
+        assert f"| {cfg['epochs']} | {cfg['batch_size']} | {cfg['lr']:g} | {cfg['early_stop']} |" in lesson, kind

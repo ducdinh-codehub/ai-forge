@@ -185,6 +185,7 @@ class Plan:
     columns: list[str] = field(default_factory=list)  # a table's columns, to change the label
     label: str | None = None  # the chosen label column of a table
     groups: int | None = None  # k-means: how many groups
+    settings: list[str] = field(default_factory=list)  # each training setting: what it does, why this value
 
     def spec(self, name: str | None = None) -> ModelSpec:
         """The model to create. It remembers the data, so the Train screen opens with it."""
@@ -207,6 +208,12 @@ class Plan:
         lines = [f"[b]Plan:[/b] {TASK_WORDS.get(self.task, self.task)} with [b]{self.title}[/b]"]
         lines += [f"  • {r}" for r in self.reasons]
         lines += [f"  [yellow]⚠ {w}[/]" for w in self.warnings]
+        if self.settings:
+            lines += ["", "[b]Training settings[/b]: what each one means, and why this value"]
+            lines += [f"  • {s}" for s in self.settings]
+            if self.train:
+                lines.append("  [dim]Change any of them on the Train screen. Guide (g) → lesson 6 explains every "
+                             "setting; F1 on the Train screen explains them with your values.[/]")
         return "\n".join(lines)
 
 
@@ -247,35 +254,78 @@ def _name(g: Goal, path: str | None) -> str:
     return safe_name("-".join(words[:3]))[:40] or "my-model"
 
 
-def _settings(n: int, kind: str) -> tuple[dict, str]:
-    """Training settings for ``n`` examples of a kind of model, and how to say them."""
+VAL_SPLIT = 0.2  # the Train screen's default: the share of the data kept aside to test the model
+
+
+def _settings(n: int, kind: str) -> tuple[dict, list[str]]:
+    """Training settings for ``n`` examples of a kind of model, each explained in plain words:
+    what the setting does and why this value suits this data."""
+    if kind == "classic":
+        return {}, ["No training settings to choose: a classic algorithm is fitted to the data in seconds, "
+                    "not trained over many passes."]
+    if kind == "agent":
+        return {"epochs": 300}, [
+            "[b]Episodes 300[/b]: an episode is one game from start to end. The agent plays 300, "
+            "trying random moves at first and its own best moves more and more.",
+            "[b]Learning rate 0.001[/b]: how big each correction of the agent's network is; the safe "
+            "start for the Adam optimizer.",
+            "AIForge tests the agent every 10 episodes and keeps the best tested version."]
     if kind == "table":
         epochs, batch = (60, 32) if n < 1000 else (30, 64) if n < 20000 else (15, 128)
         cfg = dict(epochs=epochs, batch_size=batch, lr=0.001, early_stop=8)
+        size = "a small table" if n < 1000 else "a medium table" if n < 20000 else "a big table"
+        epochs_why = (f"{size}, so it needs many passes to learn" if n < 1000 else
+                      f"{size}: each pass already teaches it a lot")
     elif kind == "transfer":
         cfg = dict(epochs=10, batch_size=32, lr=0.0003, early_stop=3)
+        epochs_why = "the pre-trained network already knows what photos look like, so a few passes are enough"
     elif kind == "image":
         cfg = dict(epochs=30 if n < 5000 else 15, batch_size=32 if n < 5000 else 64, lr=0.001, early_stop=5)
+        epochs_why = ("few images, so it needs more passes over them" if n < 5000 else
+                      "many images: each pass already teaches it a lot")
     elif kind == "text":
         cfg = dict(epochs=20 if n < 5000 else 10, batch_size=32, lr=0.001, early_stop=4)
+        epochs_why = "texts are learned quickly; more passes mostly memorise them"
     elif kind == "language_model":
         cfg = dict(epochs=10, batch_size=64, lr=0.001, early_stop=3)
+        epochs_why = "after a few passes a small text model starts copying the text instead of learning its style"
     elif kind == "autoencoder":
         cfg = dict(epochs=40 if n < 5000 else 20, batch_size=64, lr=0.001, early_stop=5)
+        epochs_why = "rebuilding examples well takes a good number of passes"
     else:
-        return {}, ""
-    text = (f"Settings: {cfg['epochs']} epochs, batch size {cfg['batch_size']}, learning rate {cfg['lr']:g}; "
-            f"stops early after {cfg['early_stop']} epochs without improvement and keeps the best one.")
-    return cfg, text
+        return {}, []
+    batch = cfg["batch_size"]
+    what = "characters" if kind == "language_model" else "examples"
+    lines = [f"[b]Epochs {cfg['epochs']}[/b]: how many times the model goes through all your training "
+             f"{what}. Why {cfg['epochs']}: {epochs_why}."]
+    if kind == "language_model" or not n:
+        lines.append(f"[b]Batch size {batch}[/b]: how many pieces it looks at together before each small "
+                     "correction. Bigger batches are faster; smaller ones correct more often.")
+    else:
+        n_train = n - max(1, int(n * VAL_SPLIT))
+        steps = max(1, -(-n_train // batch))
+        why = ("small data, so smaller batches give it more corrections per pass" if batch == 32 else
+               "a big dataset, so bigger batches keep each pass fast" if batch >= 128 else
+               "a common middle value: fast, with enough corrections per pass")
+        lines.append(f"[b]Batch size {batch}[/b]: how many examples it looks at together before each small "
+                     f"correction, here {steps:,} corrections per pass. Why {batch}: {why}.")
+    lines.append(f"[b]Learning rate {cfg['lr']:g}[/b]: how big each correction is, the most important "
+                 "setting. Too big and learning jumps around; too small and it crawls. " +
+                 ("Why 0.0003: smaller than the usual 0.001, so the pre-trained network's knowledge isn't "
+                  "overwritten." if kind == "transfer" else "Why 0.001: the safe start for the Adam optimizer."))
+    lines.append(f"[b]Validation split {VAL_SPLIT:g}[/b]: {VAL_SPLIT:.0%} of your data is kept aside and never "
+                 "trained on. It's the honest test of how the model does on data it hasn't seen.")
+    lines.append(f"[b]Early stop {cfg['early_stop']}[/b]: if the score on that kept-aside data hasn't improved "
+                 f"for {cfg['early_stop']} epochs in a row, training stops. Either way AIForge keeps the best "
+                 "epoch, not the last.")
+    return cfg, lines
 
 
 def _plan(template: str, task: str, data_cfg: dict, n: int, kind: str, reasons: list[str],
           warnings: list[str] | None = None, **extra) -> Plan:
-    train, how = _settings(n, kind)
+    train, settings = _settings(n, kind)
     reasons = reasons + [f"Model: {WHY_TEMPLATE.get(template, 'a good starting point')}."]
-    if how:
-        reasons.append(how)
-    return Plan("", "", template, task, data_cfg, train, reasons, warnings or [], **extra)
+    return Plan("", "", template, task, data_cfg, train, reasons, warnings or [], settings=settings, **extra)
 
 
 def _unsupervised(g: Goal) -> str | None:

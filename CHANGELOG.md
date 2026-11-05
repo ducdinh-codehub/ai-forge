@@ -9,7 +9,11 @@ and versions follow [Semantic Versioning](https://semver.org/) (still `0.x`: any
 - **"Just tell me what you want" goal wizard.** Write what the model should do in plain words
   (*predict house prices*, *sort photos of cats and dogs*, *find 5 groups of customers*) and point at
   your data: AIForge picks the learning style, the template, the label column and the training
-  settings, and explains each choice. It warns about common problems (very few images per class,
+  settings, and explains each choice. Every training setting it picks (epochs, batch size, learning
+  rate, validation split, early stop) comes with what it means and why that value suits your data.
+- **Guide lesson *6. Training settings*.** Every setting on the Train screen in plain words: what it
+  means, an everyday comparison, a good starting value and when to change it, plus how the goal
+  wizard picks them. The lessons after it are renumbered (7–9). It warns about common problems (very few images per class,
   unbalanced classes, an ID column, a short text) and lets you change the label column. **▶ Create &
   train** opens the Train screen with the data loaded, the model fitted to it and the settings filled
   in. Choose your own file or folder, or a famous dataset from the hub: without data, the wizard
