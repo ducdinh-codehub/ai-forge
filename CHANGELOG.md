@@ -5,6 +5,23 @@ and versions follow [Semantic Versioning](https://semver.org/) (still `0.x`: any
 
 ## [Unreleased]
 
+### Added
+- **"Just tell me what you want" goal wizard.** Write what the model should do in plain words
+  (*predict house prices*, *sort photos of cats and dogs*, *find 5 groups of customers*) and point at
+  your data: AIForge picks the learning style, the template, the label column and the training
+  settings, and explains each choice. It warns about common problems (very few images per class,
+  unbalanced classes, an ID column, a short text) and lets you change the label column. **▶ Create &
+  train** opens the Train screen with the data loaded, the model fitted to it and the settings filled
+  in. Choose your own file or folder, or a famous dataset from the hub: without data, the wizard
+  suggests the ones that fit the goal (*predict house prices* → California housing) and opens the
+  hub on the best one. Digits, clothes, CartPole and mazes need no download step. Open it from the
+  *New model* dialog (`n` → ✨) or `Ctrl+P` → *goal wizard*; on the command line:
+  `aiforge new NAME --goal "…" --data FILE`.
+
+### Fixed
+- Dialogs scroll when they are taller than the terminal, so the *New model* dialog's **Create**
+  button can be reached in a 120×35 window.
+
 ## [0.2.4] - 2026-11-04
 
 ### Added

@@ -32,7 +32,7 @@ class Dialog(ModalScreen):
     DEFAULT_CSS = """
     Dialog { align: center middle; }
     Dialog > Vertical {
-        width: 76; height: auto; max-height: 90%;
+        width: 76; height: auto; max-height: 90%; overflow-y: auto;  /* scrolls in a small terminal */
         border: thick $primary; background: $surface; padding: 1 2;
     }
     Dialog .title { text-style: bold; color: $accent; margin-bottom: 1; }
@@ -155,6 +155,7 @@ STYLE_CARDS = {  # learning style -> (card label, hint under the cards)
 
 class NewModelDialog(Dialog):
     DEFAULT_CSS = """
+    NewModelDialog #wizard { width: 100%; height: 1; border: none; margin-bottom: 1; }
     NewModelDialog #styles { height: auto; margin-top: 1; }
     NewModelDialog .style-card { width: 1fr; height: 4; min-width: 10; margin-right: 1; }
     NewModelDialog .style-card:last-of-type { margin-right: 0; }
@@ -168,7 +169,9 @@ class NewModelDialog(Dialog):
     def compose(self) -> ComposeResult:
         with Vertical():
             yield Static("✚ Create a new model", classes="title")
-            yield Static("Pick a starting point - you can change every layer afterwards.", classes="hint")
+            yield Button("✨ Not sure? Just describe what you want", id="wizard", variant="success")
+            yield Static("Or pick a starting point yourself - you can change every layer afterwards.",
+                         classes="hint")
             yield Label("Model name")
             yield Input(self.ws.unique_name("my-model"), id="name")
             yield Label("How will it learn?  [dim](Guide → lesson 3 explains the difference)[/]")
@@ -191,6 +194,9 @@ class NewModelDialog(Dialog):
         self._fill_types()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "wizard":
+            self.dismiss("wizard")
+            return
         key = (event.button.id or "").removeprefix("style-")
         if key in LEARNING_STYLES and key != self.style:
             self.style = key
