@@ -155,7 +155,7 @@ STYLE_CARDS = {  # learning style -> (card label, hint under the cards)
 
 class NewModelDialog(Dialog):
     DEFAULT_CSS = """
-    NewModelDialog #wizard { width: 100%; height: 1; border: none; margin-bottom: 1; }
+    NewModelDialog #wizard { width: 100%; height: 1; border: none; }
     NewModelDialog #styles { height: auto; margin-top: 1; }
     NewModelDialog .style-card { width: 1fr; height: 4; min-width: 10; margin-right: 1; }
     NewModelDialog .style-card:last-of-type { margin-right: 0; }
@@ -170,8 +170,7 @@ class NewModelDialog(Dialog):
         with Vertical():
             yield Static("✚ Create a new model", classes="title")
             yield Button("✨ Not sure? Just describe what you want", id="wizard", variant="success")
-            yield Static("Or pick a starting point yourself - you can change every layer afterwards.",
-                         classes="hint")
+            yield Static("Or pick a starting point - you can change every layer afterwards.", classes="hint")
             yield Label("Model name")
             yield Input(self.ws.unique_name("my-model"), id="name")
             yield Label("How will it learn?  [dim](Guide → lesson 3 explains the difference)[/]")
