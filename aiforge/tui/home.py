@@ -209,11 +209,34 @@ class HomeScreen(Screen):
 
     def action_new(self) -> None:
         def done(spec):
-            if spec:
+            if spec == "wizard":
+                self.action_wizard()
+            elif spec:
                 from .builder import BuilderScreen
 
                 self.app.push_screen(BuilderScreen(spec, is_new=True))
         self.app.push_screen(NewModelDialog(self.ws), done)
+
+    def action_wizard(self) -> None:
+        """Describe the goal in plain words; AIForge creates the model and opens it, ready to train."""
+        from .wizard import GoalDialog
+
+        def done(result):
+            if not result:
+                return
+            plan, name = result["plan"], result["name"]
+            spec = plan.spec(name)
+            if result["open"] == "builder":
+                from .builder import BuilderScreen
+
+                return self.app.push_screen(BuilderScreen(spec, is_new=True))
+            self.ws.save_spec(spec)
+            self.refresh_models(keep=name)
+            from .train import TrainScreen
+
+            self.app.push_screen(TrainScreen(name, finetune=False,
+                                             preset={**plan.data_cfg, "train": plan.train, "autofit": True}))
+        self.app.push_screen(GoalDialog(self.ws), done)
 
     def action_edit(self) -> None:
         if name := self._need_model():

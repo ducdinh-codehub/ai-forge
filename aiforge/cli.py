@@ -34,10 +34,15 @@ def add_commands(parser: argparse.ArgumentParser, common: argparse.ArgumentParse
 
     sub.add_parser("templates", parents=[common], help="Show the templates 'aiforge new' can start from")
 
-    p = sub.add_parser("new", parents=[common], help="Create a model from a template")
+    p = sub.add_parser("new", parents=[common], help="Create a model from a template, or from a goal in plain words",
+                       description="Either pick a template (-t), or say what the model should do (-g) and "
+                                   "AIForge picks the template, label column and settings for you.")
     p.add_argument("name")
-    p.add_argument("-t", "--template", required=True,
+    p.add_argument("-t", "--template",
                    help="Template name, part of it (e.g. 'tiny gpt') or its number from 'aiforge templates'")
+    p.add_argument("-g", "--goal", help='What the model should do, e.g. "predict house prices"')
+    p.add_argument("-d", "--data", help="With --goal: your data (a table, a .txt file or an image folder)")
+    p.add_argument("--target", help="With --goal: the table column to learn (default: guessed)")
 
     p = sub.add_parser("train", parents=[common], help="Train (or fine-tune) a model",
                        description="Train a model and save the best epoch. Ctrl+C stops after the current "
@@ -229,12 +234,37 @@ def cmd_new(ws, args) -> None:
         raise CLIError("Pick a name with letters or digits")
     if ws.exists(name):
         raise CLIError(f"'{name}' already exists")
+    if args.goal or args.data:
+        return _new_from_goal(ws, name, args)
+    if not args.template:
+        raise CLIError('Say which template (-t, see \'aiforge templates\') or what you want (-g "predict house prices")')
     template = find_template(args.template)
     spec = from_template(template, name)
     ws.save_spec(spec)
     out.print(f"[green]✓[/] Created [b]{name}[/b] from '{template}' "
               f"({spec.total_params():,} params). Train it with "
               f"[b]aiforge train {name} --data ...[/b]")
+
+
+def _new_from_goal(ws, name: str, args) -> None:
+    from .wizard import PlanError, plan
+
+    if args.template:
+        raise CLIError("Use either --template or --goal, not both")
+    try:
+        p = plan(args.goal or "", args.data, args.target)
+    except PlanError as e:
+        raise CLIError(str(e)) from None
+    spec = p.spec(name)
+    ws.save_spec(spec)
+    out.print(p.summary())
+    flags = {"epochs": "-e", "batch_size": "-b", "lr": "--lr", "early_stop": "--early-stop"}
+    settings = " ".join(f"{flags[k]} {v:g}" if isinstance(v, float) else f"{flags[k]} {v}"
+                        for k, v in p.train.items())
+    if p.task == "reinforcement":
+        settings = "-e 300"
+    out.print(f"[green]✓[/] Created [b]{name}[/b]. Train it with "
+              f"[b]aiforge train {name}{' ' + settings if settings else ''}[/b]")
 
 
 # -- train ---------------------------------------------------------------------------------

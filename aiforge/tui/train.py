@@ -32,13 +32,16 @@ class TrainScreen(Screen):
                 Binding("greater_than_sign", "resize_guide(-0.05)", "Narrower guide", show=False)]
 
     def __init__(self, name: str, finetune: bool, preset: dict | None = None):
-        """preset: data settings to load right away (e.g. picked in the dataset hub)."""
+        """preset: data settings to load right away (e.g. picked in the dataset hub). From the goal
+        wizard it also carries ``train`` (field values such as epochs) and ``autofit`` (fit the model
+        to the data as soon as it is loaded)."""
         super().__init__()
         self.model_name = name
         self.finetune = finetune
         self.unsupervised = self.classic = self.rl = False  # set from the model on mount
         self.preset = preset
         self.hub_key = preset.get("hub") if preset else None
+        self._autofit_on_load = bool(preset and preset.get("autofit"))
         self.spec = None  # working copy, set on mount
         self.info = None
         self.train_ds = self.val_ds = None
@@ -243,6 +246,8 @@ class TrainScreen(Screen):
         self._apply_previous_dataset()
         self._update_source_fields()
         if self.preset:
+            for key, value in self.preset.get("train", {}).items():
+                self.query_one(f"#{key}", Input).value = str(value)
             self._use_dataset(self.preset)
         if self.finetune:
             self.query_one("#save_as", Input).value = self.ws.unique_name(self.model_name + "-ft")
@@ -372,11 +377,15 @@ class TrainScreen(Screen):
         """Fill the data fields from a hub dataset and load it."""
         if not cfg:
             return
+        if self.rl:  # an environment, not a dataset
+            self._apply_previous_dataset(cfg)
+            return self._load_pressed()
         self.hub_key = cfg.get("hub")
         self.query_one("#source", Select).value = cfg["source"]
         self.query_one("#path", Input).value = cfg.get("path") or ""
         self._update_source_fields()  # fills the column lists from the new CSV
-        for sel_id, key in (("#target", "target"), ("#text_column", "text_column")):
+        for sel_id, key in (("#target", "target"), ("#text_column", "text_column"),
+                            ("#image_column", "image_column")):
             if cfg.get(key):
                 self.query_one(sel_id, Select).value = cfg[key]
         self.query_one("#task", Select).value = cfg.get("task") or "auto"
@@ -575,6 +584,11 @@ class TrainScreen(Screen):
 
     def _check_mismatch(self) -> None:
         probs = data_mismatch(self.spec, self.info) if self.info else []
+        if probs and self._autofit_on_load:  # a model the goal wizard picked: fit it without asking
+            self._autofit_on_load = False
+            return self._autofit()
+        if self.info:
+            self._autofit_on_load = False
         problems = self.spec.validate() if not probs else []
         row = self.query_one("#fit-row")
         row.display = bool(probs or problems)

@@ -59,6 +59,13 @@ class AIForgeApp(App):
             self.notify("The agent tour starts on the home screen: press Esc to go back there.", timeout=8)
         start(self, AGENT_STEPS)
 
+    def action_wizard(self) -> None:
+        home = next((s for s in self.screen_stack if isinstance(s, HomeScreen)), None)
+        if home is None or self.screen is not home:
+            self.notify("The goal wizard starts on the home screen: press Esc to go back there.", timeout=8)
+            return
+        home.action_wizard()
+
     def action_toggle_theme(self) -> None:
         self.theme = LIGHT_THEME if self.current_theme.dark else DARK_THEME
 
@@ -82,6 +89,8 @@ class AIForgeApp(App):
         yield from super().get_system_commands(screen)
         yield SystemCommand("Report a problem or idea", "Open a GitHub issue with the details filled in",
                             self.action_report_issue)
+        yield SystemCommand("Describe what you want (goal wizard)", "Say what the model should do and point at "
+                            "your data: AIForge picks the model and settings", self.action_wizard)
         yield SystemCommand("Take the guided tour", "Build, train and use a first model, step by step",
                             self.action_tour)
         yield SystemCommand("Take the agent tour", "Train a reinforcement-learning agent, watch it play and "

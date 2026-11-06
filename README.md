@@ -158,6 +158,27 @@ On the first launch AIForge offers to walk you through these steps, highlighting
 Loss going **down** and accuracy going **up** means it's learning. AIForge always saves the
 **best** epoch. 🎉 You built, trained, used and exported a neural network without code.
 
+### Even faster: just say what you want
+
+Press `n` → **✨ Not sure? Just describe what you want** (or `Ctrl+P` → *goal wizard*). Write the goal
+in plain words, choose your data and click **🔮 Make a plan**. For the data, **📂 Browse** for your own
+file or folder, or press **🗄 Famous dataset**: with no data yet, AIForge suggests datasets that fit
+your goal (*predict house prices* → California housing, *detect spam* → SMS Spam) and opens the
+dataset hub on the best one.
+
+| You write | With | AIForge picks |
+|---|---|---|
+| *predict house prices* | `houses.csv` | regression on the **price** column, a table network |
+| *sort photos of cats and dogs* | a folder with `cats/` and `dogs/` | image classification, starting from a pre-trained network |
+| *is a review positive or negative?* | `reviews.csv` | text classification on the text and label columns |
+| *find 5 groups of customers* | `customers.csv` | k-means with 5 groups, no labels needed |
+| *write poems like these* | `poems.txt` | a tiny GPT |
+| *recognise handwritten digits* · *balance a pole* | nothing | MNIST · a CartPole agent |
+
+The plan says **why** it chose each thing and warns about problems (too few images, an ID column,
+a short text). Change the label column if it guessed wrong, then **▶ Create & train**: the Train
+screen opens with the data loaded, the model fitted to it and the settings filled in.
+
 ---
 
 ## 3. The screens
@@ -499,6 +520,7 @@ trained here shows up there.
 ```bash
 aiforge templates                                   # what you can start from
 aiforge new spiral -t "mlp classifier"              # a template's number or part of its name
+aiforge new houses -g "predict house prices" -d houses.csv   # or say what you want: AIForge picks
 aiforge train spiral -d spirals -e 40 --lr 0.005    # toy set, mnist, a .csv/.txt file or an image folder
 aiforge predict spiral "0.1, 0.45"                  # or: -f table.csv -o predictions.csv
 aiforge evaluate spiral                             # metrics + a saved report

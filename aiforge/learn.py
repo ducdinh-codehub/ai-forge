@@ -94,7 +94,7 @@ Think of a student preparing for an exam:
   use them only to check how well it really learned.
 
 If the model scores well on homework but badly on the mock exam, it **memorized** instead of
-**understanding**. That's called *overfitting* (see lesson 6).
+**understanding**. That's called *overfitting* (see lesson 7).
 
 AIForge splits the data for you. You can change the split on the Train screen.
 
@@ -238,10 +238,113 @@ the left, you adjust, and you throw again. After many throws you rarely miss.
 - Optimizer **Adam**, learning rate **0.001**, batch size **64**, **10–20 epochs**. These are AIForge's defaults.
 - If the loss jumps around wildly → make the learning rate **smaller**.
 - If the loss goes down very slowly → train for more epochs or try a **bigger** learning rate.
+
+Lesson 6 explains every setting on the Train screen in detail.
+"""
+
+SETTINGS = """\
+# 6. Training settings, one by one
+
+> **In short:** the settings control the learning loop from lesson 5: how many times to go
+> through the data (**epochs**), how many examples per correction (**batch size**) and how big
+> each correction is (**learning rate**). The defaults are good. Change one thing at a time.
+
+On the Train screen, press **F1** to see these explained with *your* values and data size.
+
+## The three that matter most
+
+| Setting | What it means | Everyday comparison | Good start |
+|---|---|---|---|
+| **Epochs** | How many times the model goes through all the training examples | Reading the whole textbook again | 10–30 (tables: up to 60) |
+| **Batch size** | How many examples it looks at before each small correction | Checking 32 answers, then correcting yourself | 32–128 |
+| **Learning rate** | How big each correction is | Step size when walking downhill in fog | 0.001 |
+
+**Epochs.** Too few and the model hasn't finished learning (*underfitting*). Too many and it
+starts memorising (*overfitting*, lesson 7). With **Early stop** on you can safely pick a high
+number: training ends when it stops getting better.
+
+**Batch size.** One epoch makes *examples ÷ batch size* corrections: 400 rows in batches of 32
+is 13 corrections per pass. Smaller batches correct more often, which helps small datasets.
+Bigger batches are faster per epoch and need more memory (lower it if a GPU runs out of memory).
+
+**Learning rate.** The most important setting.
+
+```text
+  too high (0.1)         just right (0.001)       too low (0.00001)
+  loss jumps around,     loss falls smoothly       loss barely moves,
+  or becomes "nan"                                 training takes forever
+```
+
+Pre-trained (transfer-learning) models and fine-tuning use a **smaller** rate (0.0001–0.0005),
+so the knowledge they already have isn't overwritten.
+
+## Protecting against overfitting
+
+| Setting | What it means | Good start |
+|---|---|---|
+| **Validation split** | The share of the data kept aside and never trained on: the honest test on unseen data | 0.2 (20%) |
+| **Early stop** | Stop when the validation score hasn't improved for this many epochs in a row (0 = off) | 3–8 |
+| **Weight decay** | Gently pulls the model's numbers towards zero, so it prefers simple patterns | 0, or 0.01 if it overfits |
+
+Whatever you choose, AIForge **keeps the best epoch**, not the last one.
+
+## How the corrections are made
+
+| Setting | What it means | Good start |
+|---|---|---|
+| **Optimizer** | The method that does the correcting. **Adam** adapts the step size for every number by itself; **AdamW** is Adam with better weight decay (popular for Transformers); **SGD** is simple but needs a higher rate (0.01–0.1) and more epochs | Adam |
+| **LR schedule** | Changes the learning rate during training. **cosine** lowers it smoothly to ~0, often adding a little accuracy at the end; **step ÷10** divides it by 10 every third of the run | constant |
+
+## Speed (doesn't change what it learns)
+
+| Setting | What it means | Good start |
+|---|---|---|
+| **Device** | Where it runs: CPU, an NVIDIA GPU (cuda) or an Apple GPU (mps) | auto |
+| **Precision** | *auto* uses fast 16-bit maths on NVIDIA GPUs (often 2–3× faster) | auto |
+| **Data workers** | Background processes that load images while the model trains | auto |
+| **Max samples** | Train on only this many examples: a quick test before a long run (0 = all) | 0 |
+
+## Agents (reinforcement learning)
+
+| Setting | What it means | Good start |
+|---|---|---|
+| **Episodes** | Games played from start to end (instead of epochs) | 300 |
+| **Discount γ** | How much rewards later on count compared with one now. Close to 1 = plans ahead | 0.95 (small grid) – 0.99 |
+| **Explore for** | The share of the episodes in which random moves fade out, so the agent tries new things first | 0.5 |
+
+## Classic algorithms (k-means, PCA)
+
+They are **fitted**, not trained over many passes, so most settings are hidden. k-means has
+**Max rounds**: how often it may move its group centres (it stops sooner once they settle). The
+number of groups is the **k** of the KMeans layer, in the builder.
+
+## How the goal wizard picks them
+
+The ✨ goal wizard (`n` → ✨) chooses these for you from the kind of data and how much there is,
+and its plan says why for each one:
+
+| Your data | Epochs | Batch | Learning rate | Early stop |
+|---|---|---|---|---|
+| Table, under 1,000 rows | 60 | 32 | 0.001 | 8 |
+| Table, under 20,000 rows | 30 | 64 | 0.001 | 8 |
+| Table, bigger | 15 | 128 | 0.001 | 8 |
+| Photos with a pre-trained network | 10 | 32 | 0.0003 | 3 |
+| Images, under 5,000 (more) | 30 (15) | 32 (64) | 0.001 | 5 |
+| Texts to sort, under 5,000 (more) | 20 (10) | 32 | 0.001 | 4 |
+| Text to imitate (language model) | 10 | 64 | 0.001 | 3 |
+| Oddities (autoencoder), under 5,000 (more) | 40 (20) | 64 | 0.001 | 5 |
+
+## Changing settings: a simple recipe
+
+1. Train once with the defaults (or the wizard's choice) and look at the charts.
+2. Loss jumps around or becomes nan → **halve the learning rate**.
+3. Both losses still falling at the end → **more epochs**.
+4. Validation loss rises while training loss falls → **Early stop**, **Dropout** or more data (lesson 7).
+5. Compare the runs with **📈 Compare** (`m`) and keep the best.
 """
 
 FITTING = """\
-# 6. Overfitting and underfitting
+# 7. Overfitting and underfitting
 
 > **In short:** a good model **understands** the pattern. An overfit model **memorized**
 > the homework. An underfit model **didn't learn enough**.
@@ -283,7 +386,7 @@ AIForge's Train screen reads the charts for you and tells you which one is happe
 """
 
 WORKFLOW = """\
-# 7. Your first project, step by step
+# 8. Your first project, step by step
 
 > **In short:** pick a model type → pick data → train → check → use or improve.
 
@@ -295,7 +398,7 @@ WORKFLOW = """\
    first template. Templates are tested starting points.
 4. **Train** (`Ctrl+R`). Watch the loss go down. Start small: a few epochs first.
 5. **Check the result.** Is the validation score good enough? Do the two loss lines stay
-   together? See lesson 6.
+   together? See lesson 7.
 6. **Improve one thing at a time.** Change one setting, train again, compare. Changing many
    things at once makes it impossible to know what helped.
 7. **Use it.** Try predictions on new examples, then **export** it for other programs.
@@ -561,7 +664,7 @@ Text    : Embedding → LSTM → Linear
 """
 
 EVALUATING = """\
-# 8. Is my model any good?
+# 9. Is my model any good?
 
 A high number on the training charts isn't proof. A good evaluation answers three questions:
 **how often is it right, where does it go wrong, and can I trust it?** Press **`v`** on the
@@ -610,7 +713,7 @@ Testing on training examples is like grading a student with the exact exam they 
   hide a group where the model fails, which is also a fairness problem.
 - **Robustness:** add a little noise to the inputs. A model whose score collapses is fragile.
 - **Learning curves:** training and validation scores far apart = overfitting; both low =
-  underfitting (see lesson 6).
+  underfitting (see lesson 7).
 - **Model A vs B:** a small difference can be pure luck. A significance test (McNemar for
   classification, a paired bootstrap for regression) tells you if it's real: p < 0.05 means
   "probably not chance".
@@ -749,9 +852,10 @@ LESSONS: dict[str, tuple[str, str]] = {
     "learn:kinds": ("3. Supervised, unsup., RL", LEARNING_TYPES),
     "learn:tasks": ("4. Classify or predict?", TASKS),
     "learn:training": ("5. How models learn", TRAINING),
-    "learn:fitting": ("6. Over/underfitting", FITTING),
-    "learn:workflow": ("7. Your first project", WORKFLOW),
-    "learn:evaluate": ("8. Is my model good?", EVALUATING),
+    "learn:settings": ("6. Training settings", SETTINGS),
+    "learn:fitting": ("7. Over/underfitting", FITTING),
+    "learn:workflow": ("8. Your first project", WORKFLOW),
+    "learn:evaluate": ("9. Is my model good?", EVALUATING),
     "learn:choose": ("Which type to choose?", CHOOSE_TYPE),
     "learn:tabular": ("📊 Tabular data", TABULAR),
     "learn:vision": ("🖼 Computer vision", VISION),
@@ -762,7 +866,7 @@ LESSONS: dict[str, tuple[str, str]] = {
 }
 
 BASICS = ["learn:what", "learn:data", "learn:kinds", "learn:tasks", "learn:training",
-          "learn:fitting", "learn:workflow", "learn:evaluate"]
+          "learn:settings", "learn:fitting", "learn:workflow", "learn:evaluate"]
 TYPES = ["learn:choose", "learn:tabular", "learn:vision", "learn:language", "learn:manual",
          "learn:unsupervised", "learn:reinforcement"]
 
