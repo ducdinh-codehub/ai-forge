@@ -63,8 +63,7 @@ def trained(ws):
     spec = make_spec("MLP classifier (tabular)", "spiral")
     ws.save_spec(spec)
     data = load_data(ws, spec, data_cfg_from_arg("spirals", spec, samples=900))
-    torch.manual_seed(0)
-    train_model(ws, "spiral", data, TrainConfig(epochs=15, lr=0.01, device="cpu"), on_log=lambda m: None)
+    train_model(ws, "spiral", data, TrainConfig(epochs=15, lr=0.01, device="cpu", seed=0), on_log=lambda m: None)
     return ws
 
 

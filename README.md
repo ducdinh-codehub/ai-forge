@@ -209,14 +209,23 @@ Mistakes show up in red right away. Layers you don't change **keep what they lea
    |---|---|---|
    | Epochs | Passes through the data | 10–50 |
    | Batch size | Examples per update | 32–128 |
-   | Learning rate | Step size: too high = unstable, too low = slow | 0.001 |
+   | Learning rate | Step size: too high = unstable, too low = slow. **🔎 Find LR** suggests one | 0.001 |
    | Early stop | Stop after N epochs with no improvement (0 = off) | 0 or 5 |
    | Device | CPU or GPU | auto |
    | Precision | `auto` trains in mixed 16-bit precision on NVIDIA GPUs: often 2–3× faster | auto |
    | Data workers | Processes that load images in the background (`auto`: Linux, 1,000+ images) | auto |
+   | Seed | Same seed, data and settings = same model. Empty = a new seed each run, saved in the history | empty |
+   | Balance classes | Rare classes count more, so the model doesn't just favour the common one | off |
 
 3. Click **▶ Start** (`Ctrl+R`). Watch the charts, the log and the **💻 This computer** panel
    (CPU, RAM, GPU usage, samples/s).
+
+**Not sure about the learning rate?** Click **🔎 Find LR**: a copy of the model trains for 100
+batches while the rate grows from tiny to huge, the chart shows the loss for each, and the
+learning rate box is set to a tenth of the rate where the loss was lowest. Your model doesn't change.
+
+**Comparing settings fairly:** each run's seed is shown in the log and the history. Type the same
+**Seed** for two runs and the setting you changed is the only difference between them.
 
 **Pause and resume:** **■ Stop** saves the best epoch so far, and the run can be continued later.
 If training stops early (Stop, a crash, closing the app), the Train screen shows **⏯ Resume**:
@@ -448,7 +457,8 @@ It moves on by itself as you do each step. Or read `g` → **🎮 Reinforcement*
 | Both losses go down and level off | 👍 Learning well | Nothing |
 | Train loss down, **val loss up** | Overfitting (memorizing) | Add Dropout, fewer epochs, Early stop, more data |
 | Both stay high | Underfitting | More epochs, bigger model, higher learning rate |
-| Lines jump around | Learning rate too high | Lower it (0.001 → 0.0003) |
+| Lines jump around | Learning rate too high | Lower it (0.001 → 0.0003), or **🔎 Find LR** |
+| High accuracy, but a rare class is never predicted | Unbalanced classes | **Balance classes: on** |
 | Loss is `nan` | Training broke | Much lower learning rate, start again |
 
 New to the words (epoch, loss, overfitting…)? Press `g` → **🎓 ML basics**.
@@ -539,6 +549,8 @@ aiforge list
 | Fine-tune into a new model | `aiforge train spiral -d moons --save-as moons` |
 | Train a tiny GPT and let it write | `aiforge train gpt -d poems.txt` then `aiforge generate gpt "Once upon"` |
 | Force full precision / load images with 4 processes | `--precision fp32` · `--workers 4` |
+| Get a learning rate suggested (trains nothing) | `aiforge train spiral -d spirals --find-lr` |
+| Repeat a run exactly / balance rare classes | `--seed 42` · `--balance` |
 | Train on a Hugging Face dataset | `aiforge train reviews -d hf:imdb` (`hf:NAME:SUBSET`, `--split test`) |
 | Train on an Excel file / a table of image paths | `-d sales.xlsx` · `-d photos.csv` (image models; `--image-column file`) |
 | Compare runs (best one gets a ★) | `aiforge compare small big --metric val_acc` (`--last 3`) |

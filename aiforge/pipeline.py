@@ -13,8 +13,8 @@ from torch import nn
 from . import data as datamod
 from .data import DataInfo
 from .spec import CLASSIC_TASKS, ModelSpec, Workspace, safe_name
-from .trainer import (CHECKPOINT, Trainer, TrainConfig, data_mismatch, fit_spec_to_data, load_checkpoint,
-                      reset_head)
+from .trainer import (CHECKPOINT, Trainer, TrainConfig, apply_seed, data_mismatch, fit_spec_to_data,
+                      load_checkpoint, reset_head)
 
 TEXT_SUFFIXES = datamod.TEXT_EXT
 
@@ -152,6 +152,7 @@ def train_model(ws: Workspace, name: str, data: LoadedData, cfg: TrainConfig, *,
     if not finetune:
         spec.frozen = []
 
+    on_log(f"Seed {apply_seed(cfg)}: the same seed, data and settings train the same model again.")
     model: nn.Module
     if resume or finetune:
         if not ws.has_weights(name):
@@ -170,6 +171,19 @@ def train_model(ws: Workspace, name: str, data: LoadedData, cfg: TrainConfig, *,
             "data_cfg": stored_data_cfg(data.cfg)}
     return _train_and_save(ws, name, save_as, spec, model, data, cfg, meta, None,
                            on_log, on_batch, on_epoch, on_trainer)
+
+
+def find_lr(ws: Workspace, name: str, data: LoadedData, cfg: TrainConfig, *, resume: bool = False,
+            auto_fit: bool = True, on_step: Callable[[int, int, float, float], None] | None = None) -> dict:
+    """Try learning rates on ``name`` (see Trainer.find_lr) without training or saving it.
+    ``resume``: try them on the saved weights, like a run that continues from them."""
+    check_config(cfg)
+    spec = ws.load_spec(name)
+    prepare(spec, data.info, auto_fit)
+    spec.frozen = []
+    model = ws.load_model(name, spec)[1] if resume and ws.has_weights(name) else spec.build()
+    trainer = Trainer(spec, model, data.train, data.val, cfg, on_log=lambda m: None)
+    return trainer.find_lr(on_step=on_step)
 
 
 def _resume(ws, name, data, cfg, ck, on_log, on_batch, on_epoch, on_trainer):

@@ -70,6 +70,8 @@ def training_script(spec: ModelSpec, cfg: TrainConfig) -> str:
         "weight_decay": cfg.weight_decay, "scheduler": cfg.scheduler, "early_stop": cfg.early_stop,
         "max_samples": cfg.max_samples, "val_split": float(data_cfg.get("val_split", 0.2)),
         "seed": int(data_cfg.get("seed", 42)),
+        "train_seed": cfg.seed,  # starting weights, shuffles and dropout (-1: a new one each run)
+        "balance": cfg.balance and spec.task == "classification",
     }
     data = {k: v for k, v in data_cfg.items() if k not in ("val_split", "seed", "hub")}
     if source in ("image_folder", "image_csv"):
@@ -421,9 +423,20 @@ def load_data(path):
 '''
 
 _LOOP = '''
-def run_batches(model, loader, device, opt=None):
+def loss_function(train, info, device):
+    if TASK == "regression":
+        return nn.MSELoss()
+    if not SETTINGS["balance"]:
+        return nn.CrossEntropyLoss()
+    # Balance classes: every class counts equally, however many examples it has.
+    labels = torch.tensor([int(v) for _, batch in DataLoader(train, batch_size=1024) for v in batch])
+    counts = torch.bincount(labels, minlength=len(info.get("classes", []))).float()
+    weight = torch.where(counts > 0, counts.sum() / (len(counts) * counts.clamp(min=1)), torch.zeros_like(counts))
+    return nn.CrossEntropyLoss(weight=weight.to(device))
+
+
+def run_batches(model, loader, device, lossf, opt=None):
     """One pass over the data; trains when an optimizer is given. Returns (loss, accuracy)."""
-    lossf = nn.MSELoss() if TASK == "regression" else nn.CrossEntropyLoss()
     total, correct, n = 0.0, 0.0, 0
     for x, y in loader:
         x, y = x.to(device), y.to(device)
@@ -467,12 +480,15 @@ def main():
     val_dl = DataLoader(val, batch_size=args.batch_size) if len(val) else None
     print(f"{len(train):,} training / {len(val):,} validation examples", info.get("classes", ""))
 
+    if SETTINGS["train_seed"] >= 0:  # the same starting weights, shuffles and dropout as in AIForge's run
+        torch.manual_seed(SETTINGS["train_seed"])
     model = build_model()
     if args.init:
         model.load_state_dict(torch.load(args.init, map_location="cpu", weights_only=True), strict=False)
     for i in FROZEN_LAYERS:
         model[i].requires_grad_(False)
     model.to(args.device)
+    lossf = loss_function(train, info, args.device)
     params = [q for q in model.parameters() if q.requires_grad]
     if SETTINGS["optimizer"] == "SGD":
         opt = torch.optim.SGD(params, lr=args.lr, momentum=0.9, weight_decay=SETTINGS["weight_decay"])
@@ -488,14 +504,14 @@ def main():
         model.train()
         for i in FROZEN_LAYERS:  # frozen layers keep their BatchNorm statistics and skip dropout
             model[i].eval()
-        loss, acc = run_batches(model, train_dl, args.device, opt)
+        loss, acc = run_batches(model, train_dl, args.device, lossf, opt)
         if sched:
             sched.step()
         line = f"epoch {epoch:>3}  loss {loss:.4f}"
         score = loss
         if val_dl:
             model.eval()
-            score, val_acc = run_batches(model, val_dl, args.device)
+            score, val_acc = run_batches(model, val_dl, args.device, lossf)
             line += f"  val loss {score:.4f}"
             if TASK == "classification":
                 line += f"  val acc {val_acc:.1%}"
