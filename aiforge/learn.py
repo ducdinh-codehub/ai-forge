@@ -278,6 +278,23 @@ Bigger batches are faster per epoch and need more memory (lower it if a GPU runs
 Pre-trained (transfer-learning) models and fine-tuning use a **smaller** rate (0.0001–0.0005),
 so the knowledge they already have isn't overwritten.
 
+**Let AIForge find it: 🔎 Find LR.** On the Train screen (or `aiforge train MODEL --find-lr`), a
+copy of the model trains for 100 batches while the rate grows from 0.0000001 to 1. The loss stays
+flat while the rate is too small, falls once it is big enough, then shoots up when it is too big.
+AIForge picks **a tenth of the rate where the loss was lowest**: on the falling part, safely below
+where learning breaks down. Your model doesn't change.
+
+```text
+  loss
+   │ ─────────╮
+   │ too small ╲                       ╱  too big:
+   │            ╲                     ╱   it blows up
+   │             ╲                   ╱
+   │              ╲_________________╱
+   └─────────────┬────────────┬──────────── learning rate (tiny → huge)
+            suggestion     lowest
+```
+
 ## Protecting against overfitting
 
 | Setting | What it means | Good start |
@@ -294,6 +311,16 @@ Whatever you choose, AIForge **keeps the best epoch**, not the last one.
 |---|---|---|
 | **Optimizer** | The method that does the correcting. **Adam** adapts the step size for every number by itself; **AdamW** is Adam with better weight decay (popular for Transformers); **SGD** is simple but needs a higher rate (0.01–0.1) and more epochs | Adam |
 | **LR schedule** | Changes the learning rate during training. **cosine** lowers it smoothly to ~0, often adding a little accuracy at the end; **step ÷10** divides it by 10 every third of the run | constant |
+
+## Fair comparisons and rare classes
+
+| Setting | What it means | Good start |
+|---|---|---|
+| **Seed** | Fixes the random numbers training uses (starting weights, example order, dropout), so the same seed, data and settings give the same model. Empty = a new seed each run, saved in the history so you can repeat it | empty; set one to compare settings fairly |
+| **Balance classes** | Makes every class count equally in the loss, so the model doesn't just favour the common class. For classification only | off; on when one class is far rarer |
+
+Two runs with different seeds differ a little even with the same settings. To find out whether
+a setting really helps, give both runs **the same seed**, so the setting is the only difference.
 
 ## Speed (doesn't change what it learns)
 
@@ -336,11 +363,14 @@ and its plan says why for each one:
 
 ## Changing settings: a simple recipe
 
-1. Train once with the defaults (or the wizard's choice) and look at the charts.
+1. Train once with the defaults (or the wizard's choice) and look at the charts. Unsure about the
+   learning rate? Press **🔎 Find LR** first.
 2. Loss jumps around or becomes nan → **halve the learning rate**.
 3. Both losses still falling at the end → **more epochs**.
 4. Validation loss rises while training loss falls → **Early stop**, **Dropout** or more data (lesson 7).
-5. Compare the runs with **📈 Compare** (`m`) and keep the best.
+5. Compare the runs with **📈 Compare** (`m`) and keep the best. Type the same **Seed** for every
+   run, so the setting you changed is the only difference.
+6. One class is much rarer and accuracy is high but it's never predicted → **Balance classes: on**.
 """
 
 FITTING = """\

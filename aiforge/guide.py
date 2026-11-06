@@ -837,7 +837,8 @@ def training_settings_markdown(spec: ModelSpec, values: dict, n_train: int | Non
                       "training from scratch 0.001 is a common start.")
         else:
             md.append(f"\n✅ {lr:g} is a sensible value" + (" for fine-tuning." if finetune else "."))
-    md.append("")
+    md += ["", "Not sure? **🔎 Find LR** tries rates from tiny to huge on a copy of the model for 100 "
+               "batches, draws the loss for each, and fills in a tenth of the rate where it was lowest.", ""]
 
     md += [f"## Optimizer = {opt}" if opt else "## Optimizer", {
         "Adam": "**Adam** adapts the step size for every parameter automatically. The safest default.",
@@ -883,6 +884,23 @@ def training_settings_markdown(spec: ModelSpec, values: dict, n_train: int | Non
            "never waits for data. Only image data benefits. `auto` uses up to 4 on Linux for 1,000+ "
            "images. On macOS and Windows each worker needs a few seconds to start and stop, so "
            "they only pay off on long runs over many images - try 2 if an epoch is slow.", ""]
+
+    seed = _num(values.get("seed"), int)
+    md += ["## Seed = " + (str(seed) if seed is not None else "new each run"),
+           "Training uses random numbers: the starting weights, the order of the examples and dropout. "
+           "The seed fixes them, so the same seed, data and settings train the same model again (on a "
+           "GPU tiny differences can remain). " +
+           ("Every run uses this seed." if seed is not None else
+            "Empty: each run picks a new one, shown in the log and saved in the history, so you can "
+            "repeat any run by typing its seed here.") +
+           " Comparing two settings? Give both runs the same seed, so only the setting differs.", ""]
+    if spec.task == "classification":
+        md += ["## Balance classes = " + ("on" if values.get("balance") == "on" else "off"),
+               "When one class is much more common (95% *not spam*), a model can score well by always "
+               "guessing it. **On** makes each class count equally in the loss: an example of a rare class "
+               "counts as much more as that class is rarer. Turn it on when the classes are unbalanced "
+               "and the rare one matters; Evaluate warns when they are. The validation loss is weighted "
+               "the same way, so compare it only with runs that also balance.", ""]
 
     md += ["## What is being learned",
            f"The model has **{total:,} parameters**."]

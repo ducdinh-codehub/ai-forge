@@ -22,6 +22,22 @@ and versions follow [Semantic Versioning](https://semver.org/) (still `0.x`: any
   *New model* dialog (`n` → ✨) or `Ctrl+P` → *goal wizard*; on the command line:
   `aiforge new NAME --goal "…" --data FILE`.
 
+- **🔎 Learning-rate finder.** One button on the Train screen (or `aiforge train MODEL --find-lr`)
+  trains a copy of the model for 100 batches while the learning rate grows from 0.0000001 to 1,
+  charts the loss, and fills in a tenth of the rate where the loss was lowest. The model itself
+  doesn't change.
+- **Seed: repeatable runs.** A *Seed* field on the Train screen and `--seed N` fix the starting
+  weights, the order of the examples and dropout, so the same seed, data and settings train the same
+  model. Left empty, each run picks a new seed; it is shown in the log, saved in the history (and on
+  the home screen), and used by the exported `train.py`. Give two runs the same seed to compare
+  settings fairly.
+- **Balance classes.** For classification, *Balance classes: on* (`--balance`) makes every class
+  count equally in the loss, so a model can't score well by always guessing the common class. The
+  goal wizard turns it on when the biggest class is more than 3× the smallest, and says why; the
+  exported `train.py` balances the same way.
+- Guide lesson *6. Training settings* explains the finder, the seed and balancing, and the Train
+  screen's F1 panel explains them with your values.
+
 ### Fixed
 - Dialogs scroll when they are taller than the terminal, so the *New model* dialog's **Create**
   button can be reached in a 120×35 window.

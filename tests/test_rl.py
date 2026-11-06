@@ -4,7 +4,6 @@ import asyncio
 
 import numpy as np
 import pytest
-import torch
 
 from aiforge import data as datamod
 from aiforge import evaluate as ev
@@ -16,12 +15,11 @@ from aiforge.trainer import TrainConfig, Trainer, data_mismatch, fit_spec_to_dat
 
 
 def _agent(ws, template="GridWorld agent (DQN)", name="a", episodes=200, **env):
-    torch.manual_seed(0)
     ws.save_spec(from_template(template, name))
     spec = ws.load_spec(name)
     cfg = {"source": "env", **spec.data["env"], **env}
     loaded = pipeline.load_data(ws, spec, cfg)
-    run, _ = pipeline.train_model(ws, name, loaded, TrainConfig(epochs=episodes, gamma=0.95),
+    run, _ = pipeline.train_model(ws, name, loaded, TrainConfig(epochs=episodes, gamma=0.95, seed=0),
                                   on_log=lambda m: None)
     spec, model, _ = ws.load_model(name)
     return spec, model, run

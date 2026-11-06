@@ -176,7 +176,9 @@ class HomeScreen(Screen):
                 kind = run.get("kind", "train")
                 size = (f"{len(run.get('epochs', []))} episodes" if "reward" in last else
                         f"{len(run.get('epochs', []))} ep  loss {last.get('val_loss', last.get('train_loss', 0)):.4f}")
-                text.append(f" {i}. {run['started']}  {kind:<9} {size}  {metric}  [dim]{run.get('dataset', '')}[/]")
+                seed = run.get("config", {}).get("seed", -1)
+                seed = f"  [dim]seed {seed}[/]" if seed >= 0 else ""
+                text.append(f" {i}. {run['started']}  {kind:<9} {size}  {metric}{seed}  [dim]{run.get('dataset', '')}[/]")
         elif not self.ws.has_weights(name):
             text += ["", "[yellow]Not trained yet - press [b]t[/b] to train.[/]"]
         if evals := self._evaluations(name):

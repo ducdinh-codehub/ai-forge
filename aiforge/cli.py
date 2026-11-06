@@ -86,6 +86,12 @@ def add_commands(parser: argparse.ArgumentParser, common: argparse.ArgumentParse
                    help="auto = mixed 16-bit precision on NVIDIA GPUs (faster), fp32 = always full precision")
     t.add_argument("--workers", type=int, default=-1, metavar="N",
                    help="Background processes that load images while training (-1 = auto)")
+    t.add_argument("--seed", type=int, default=-1, metavar="N",
+                   help="Same seed, data and settings = same model (default: a new seed, shown and saved in the history)")
+    t.add_argument("--balance", action="store_true",
+                   help="Classification: rare classes count more, so the model doesn't just favour the common ones")
+    t.add_argument("--find-lr", action="store_true",
+                   help="Don't train: try learning rates on a copy of the model and suggest one")
     t.add_argument("--resume", action="store_true",
                    help="Continue the last interrupted run where it stopped, or else start from the saved weights")
     t.add_argument("--save-as", metavar="NAME",
@@ -259,8 +265,8 @@ def _new_from_goal(ws, name: str, args) -> None:
     ws.save_spec(spec)
     out.print(p.summary())
     flags = {"epochs": "-e", "batch_size": "-b", "lr": "--lr", "early_stop": "--early-stop"}
-    settings = " ".join(f"{flags[k]} {v:g}" if isinstance(v, float) else f"{flags[k]} {v}"
-                        for k, v in p.train.items())
+    settings = " ".join("--balance" if k == "balance" else f"{flags[k]} {v:g}" if isinstance(v, float) else
+                        f"{flags[k]} {v}" for k, v in p.train.items() if v is not False)
     if p.task == "reinforcement":
         settings = "-e 300"
     out.print(f"[green]✓[/] Created [b]{name}[/b]. Train it with "
@@ -317,9 +323,10 @@ def cmd_train(ws, args) -> int:
     cfg = TrainConfig(epochs=args.epochs, batch_size=args.batch_size, lr=args.lr, optimizer=args.optimizer,
                       weight_decay=args.weight_decay, scheduler=args.scheduler, early_stop=args.early_stop,
                       device=args.device, max_samples=args.max_samples, precision=args.precision,
-                      workers=args.workers, gamma=args.gamma, explore=args.explore)
+                      workers=args.workers, gamma=args.gamma, explore=args.explore, seed=args.seed,
+                      balance=args.balance)
     ck = pipeline.interrupted_run(ws, args.model)
-    if ck and args.resume:
+    if ck and args.resume and not args.find_lr:
         if problem := pipeline.resume_problem(ws, args.model, ck):
             raise CLIError(problem)
         if args.data or args.save_as:
@@ -338,7 +345,7 @@ def cmd_train(ws, args) -> int:
         data_cfg = {"source": "env", **spec.data["env"], **{k: v for k, v in opts.items() if v is not None}}
     else:
         raise CLIError(f"'{args.model}' hasn't been trained before - say which data with --data")
-    if ck and not args.resume:
+    if ck and not args.resume and not args.find_lr:
         out.print(f"[yellow]'{args.model}' has an unfinished run (epoch {ck['epoch']}/{ck['config']['epochs']}) - "
                   "starting over. Use --resume to continue it instead.[/]")
     pipeline.check_config(cfg)
@@ -350,6 +357,9 @@ def cmd_train(ws, args) -> int:
               f"  input {tuple(info.input_shape)} {info.input_dtype} · {info.task} · " +
               (f"actions: {', '.join(info.class_names)}" if info.task == "reinforcement" else
                f"{len(data.train):,} train / {len(data.val):,} validation samples"))
+
+    if args.find_lr:
+        return _find_lr(ws, args, data, cfg)
 
     progress = Progress(TextColumn("  epoch {task.fields[epoch]}/{task.total}"), BarColumn(),
                         TextColumn("loss {task.fields[loss]:.4f}"), TimeRemainingColumn(),
@@ -415,6 +425,34 @@ def cmd_train(ws, args) -> int:
              f"fitted in {len(run['epochs'])} round{'s' if len(run['epochs']) != 1 else ''}"
              if spec.task in CLASSIC_TASKS else f"best epoch {last['epoch']} of {len(run['epochs'])}")
     out.print(f"[green]✓[/] Saved [b]{spec.name}[/b] ({steps}{best}) in {run['duration_s']}s")
+    return 0
+
+
+def _find_lr(ws, args, data, cfg) -> int:
+    from . import pipeline
+
+    with out.status("Trying learning rates on a copy of the model…") as status:
+        res = pipeline.find_lr(ws, args.model, data, cfg, resume=args.resume, auto_fit=not args.no_auto_fit,
+                               on_step=lambda i, n, lr, loss: status.update(
+                                   f"Trying learning rates on a copy of the model… {i}/{n} · lr {lr:.1e} · "
+                                   f"loss {loss:.4f}"))
+    lrs, losses = res["lrs"], res["losses"]
+    if lrs:
+        lo, hi = min(losses), max(losses)
+        width = 40
+        out.print("\n  learning rate   loss (smoothed)")
+        rows = {round(k * (len(lrs) - 1) / 11) for k in range(12)} | {lrs.index(res["lowest"])}
+        for i in sorted(rows):
+            bar = "█" * max(1, round((losses[i] - lo) / ((hi - lo) or 1) * width))
+            mark = "  [green]← lowest[/]" if lrs[i] == res["lowest"] else ""
+            out.print(f"  {lrs[i]:>12.1e}   {losses[i]:>8.4f} [cyan]{bar}[/]{mark}")
+    if res["suggestion"] is None:
+        out.print("\n[yellow]The loss never clearly fell, so there's no suggestion.[/] Check the data and the "
+                  "model (does the label make sense?), or try a bigger --batch-size.")
+        return 1
+    out.print(f"\n[green]✓[/] Suggested learning rate: [b]{res['suggestion']:g}[/b] (a tenth of where the loss "
+              f"was lowest, {res['lowest']:.1e}). Nothing was trained or saved.\n"
+              f"  Train with it: aiforge train {args.model} --lr {res['suggestion']:g}")
     return 0
 
 

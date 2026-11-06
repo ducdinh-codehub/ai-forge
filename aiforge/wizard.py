@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import copy
 import re
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -321,9 +322,28 @@ def _settings(n: int, kind: str) -> tuple[dict, list[str]]:
     return cfg, lines
 
 
+UNBALANCED = 3  # the biggest class this many times the smallest: balance them (Evaluate warns from here too)
+
+
+def _imbalance(counts) -> float:
+    """How many times more examples the most common class has than the rarest."""
+    counts = [c for c in counts if c]
+    return max(counts) / min(counts) if len(counts) > 1 else 1.0
+
+
+def _label_counts(header: list[str], rows: list[list[str]], column: str) -> Counter:
+    i = header.index(column)
+    return Counter(r[i].strip() for r in rows if len(r) == len(header) and r[i].strip())
+
+
 def _plan(template: str, task: str, data_cfg: dict, n: int, kind: str, reasons: list[str],
-          warnings: list[str] | None = None, **extra) -> Plan:
+          warnings: list[str] | None = None, imbalance: float = 1.0, **extra) -> Plan:
     train, settings = _settings(n, kind)
+    if task == "classification" and imbalance > UNBALANCED and train:
+        train["balance"] = True
+        settings.append(f"[b]Balance classes on[/b]: the most common class has {imbalance:.0f}× as many "
+                        "examples as the rarest. Without it the model could score well by mostly guessing the "
+                        "common one; on, every class counts equally in its lessons.")
     reasons = reasons + [f"Model: {WHY_TEMPLATE.get(template, 'a good starting point')}."]
     return Plan("", "", template, task, data_cfg, train, reasons, warnings or [], settings=settings, **extra)
 
@@ -395,9 +415,9 @@ def _table_plan(g: Goal, p: Path, label: str | None) -> Plan:
     if unsup:
         return _table_unsupervised(g, p, cols, label, about, unsup, n)
     if image_col:
-        return _image_table_plan(g, p, cols, image_col, label, about, n)
+        return _image_table_plan(g, p, cols, image_col, label, about, n, (header, rows))
     if text_col and (g.text_data or len(cols) <= 3):  # a text and its label (a long "address" is no text to sort)
-        return _text_table_plan(g, p, cols, text_col, label, about, n)
+        return _text_table_plan(g, p, cols, text_col, label, about, n, (header, rows))
 
     target, why = _pick_label(g, cols, label, exclude=())
     tc = next(c for c in cols if c.name == target)
@@ -420,7 +440,8 @@ def _table_plan(g: Goal, p: Path, label: str | None) -> Plan:
         warnings.append(f"Only {n} rows: the model may just memorise them. A few hundred rows work much better.")
     template = "MLP regressor (tabular)" if task == "regression" else "MLP classifier (tabular)"
     cfg = {"source": "csv", "path": str(p.resolve()), "target": target, "task": task}
-    return _plan(template, task, cfg, n, "table", reasons, warnings, columns=names, label=target)
+    ratio = _imbalance(_label_counts(header, rows, target).values()) if task == "classification" else 1.0
+    return _plan(template, task, cfg, n, "table", reasons, warnings, imbalance=ratio, columns=names, label=target)
 
 
 def _pick_label(g: Goal, cols: list[Column], label: str | None, exclude) -> tuple[str, str]:
@@ -441,7 +462,7 @@ def _id_warnings(cols: list[Column], n: int, target: str | None) -> list[str]:
             for c in ids]
 
 
-def _text_table_plan(g: Goal, p, cols, text_col, label, about, n) -> Plan:
+def _text_table_plan(g: Goal, p, cols, text_col, label, about, n, table) -> Plan:
     target, why = _pick_label(g, cols, label, exclude=(text_col.name,))
     tc = next(c for c in cols if c.name == target)
     reasons = [about, f"Text column: [b]{text_col.name}[/b] (about {text_col.avg_words:.0f} words each).",
@@ -456,16 +477,17 @@ def _text_table_plan(g: Goal, p, cols, text_col, label, about, n) -> Plan:
                 else "Text Transformer classifier")
     cfg = {"source": "csv_text", "path": str(p.resolve()), "text_column": text_col.name, "target": target}
     return _plan(template, "classification", cfg, n, "text", reasons, warnings,
-                 columns=[c.name for c in cols if c.name != text_col.name], label=target)
+                 imbalance=_imbalance(_label_counts(*table, target).values()), columns=[c.name for c in cols if c.name != text_col.name], label=target)
 
 
-def _image_table_plan(g: Goal, p, cols, image_col, label, about, n) -> Plan:
+def _image_table_plan(g: Goal, p, cols, image_col, label, about, n, table) -> Plan:
     target, why = _pick_label(g, cols, label, exclude=(image_col.name,))
     reasons = [about, f"Image column: [b]{image_col.name}[/b] (paths to image files).",
                f"Label column: [b]{target}[/b] ({why}): the model sorts each image into its values."]
     template, kind = _image_template(g, None, n)
     cfg = {"source": "image_csv", "path": str(p.resolve()), "image_column": image_col.name, "target": target}
     return _plan(template, "classification", cfg, n, kind, reasons,
+                 imbalance=_imbalance(_label_counts(*table, target).values()),
                  columns=[c.name for c in cols if c.name != image_col.name], label=target)
 
 
@@ -534,13 +556,15 @@ def _image_folder_plan(g: Goal, root: Path) -> Plan:
         if min(counts.values()) < 20:
             warnings.append(f"'{min(counts, key=counts.get)}' has only {min(counts.values())} images. "
                             "Aim for at least 50 per class.")
-        if max(counts.values()) > 5 * min(counts.values()):
-            warnings.append("Some classes have far more images than others; the model will favour them.")
+        ratio = _imbalance(counts.values())
+        if ratio > UNBALANCED:
+            warnings.append("Some classes have far more images than others, so the model would favour them: "
+                            "Balance classes is on to make up for it.")
         template, kind = _image_template(g, sample, n)
         if kind == "transfer":
             reasons.append("Photos are resized to 224×224, the size the pre-trained network knows.")
         cfg = {"source": "image_folder", "path": str(root.resolve())}
-        return _plan(template, "classification", cfg, n, kind, reasons, warnings)
+        return _plan(template, "classification", cfg, n, kind, reasons, warnings, imbalance=ratio)
 
     images = [f for f in root.rglob("*") if f.suffix.lower() in datamod.IMAGE_EXT]
     if not images:

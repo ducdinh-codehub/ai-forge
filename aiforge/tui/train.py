@@ -21,8 +21,8 @@ from .chart import LineChart
 from .resize import DEFAULT_FRACTION, MAX_FRACTION, MIN_FRACTION, ResizeHandle
 from .star import count_training
 from .sysmon import SystemPanel
-from ..trainer import (PRECISIONS, TrainConfig, Trainer, available_devices, data_mismatch, fit_spec_to_data,
-                       pick_device, reset_head)
+from ..trainer import (PRECISIONS, TrainConfig, Trainer, apply_seed, available_devices, data_mismatch,
+                       fit_spec_to_data, pick_device, reset_head)
 
 
 class TrainScreen(Screen):
@@ -178,6 +178,14 @@ class TrainScreen(Screen):
                         yield Label("Data workers")
                         yield Select([("auto", "-1")] + [(str(n), str(n)) for n in (0, 1, 2, 4, 8)],
                                      value="-1", allow_blank=False, id="workers")
+                with Horizontal(classes="row", id="row-seed"):
+                    with Vertical():
+                        yield Label("Seed  [dim](empty = new each run)[/]")
+                        yield Input(placeholder="random", id="seed", type="integer")
+                    with Vertical(id="col-balance"):
+                        yield Label("Balance classes")
+                        yield Select([("off", "off"), ("on: rare classes count more", "on")], value="off",
+                                     allow_blank=False, id="balance")
                 if not self.finetune:
                     with Horizontal(classes="switch-row", id="row-resume"):
                         yield Switch(True, id="resume")
@@ -207,6 +215,8 @@ class TrainScreen(Screen):
                     yield Button("▶ Start", id="start", variant="success")
                     yield Button("⏯ Resume", id="resume-run", variant="primary",
                                  tooltip="Continue the unfinished run where it stopped")
+                    yield Button("🔎 Find LR", id="find-lr",
+                                 tooltip="Try learning rates on a copy of the model and suggest one")
                     yield Button("■ Stop", id="stop", variant="error", disabled=True)
                     yield Button("📖 Guide", id="guide-btn")
                     yield Static("", id="epoch-label")
@@ -247,7 +257,8 @@ class TrainScreen(Screen):
         self._update_source_fields()
         if self.preset:
             for key, value in self.preset.get("train", {}).items():
-                self.query_one(f"#{key}", Input).value = str(value)
+                field = self.query_one(f"#{key}")
+                field.value = ("on" if value else "off") if isinstance(field, Select) else str(value)
             self._use_dataset(self.preset)
         if self.finetune:
             self.query_one("#save_as", Input).value = self.ws.unique_name(self.model_name + "-ft")
@@ -267,6 +278,8 @@ class TrainScreen(Screen):
         self.classic = self.spec.task in CLASSIC_TASKS
         self.rl = is_reinforcement(self.spec.task)
         self.query_one("#grp-env").display = self.query_one("#row-rl").display = self.rl
+        self.query_one("#col-balance").display = self.spec.task == "classification"  # updated when data loads
+        self.query_one("#find-lr").display = not (self.classic or self.rl)
         if self.rl:
             return self._setup_agent()
         if not self.unsupervised:
@@ -548,6 +561,7 @@ class TrainScreen(Screen):
             classes = (f"labels kept aside to check the groups: {', '.join(info.class_names[:8])}"
                        f"{'…' if len(info.class_names) > 8 else ''}") if info.class_names else "no labels used"
         used = f" (using {len(self.train_ds):,})" if n else ""
+        self.query_one("#col-balance").display = info.task == "classification"
         if info.task == "reinforcement":
             return self._environment_ready(info)
         self.query_one("#data-info", Static).update(
@@ -734,6 +748,8 @@ class TrainScreen(Screen):
         self.query_one("#optimizer", Select).value = c["optimizer"]
         self.query_one("#scheduler", Select).value = c["scheduler"]
         self.query_one("#precision", Select).value = c.get("precision", "auto")
+        self.query_one("#seed", Input).value = str(c["seed"]) if c.get("seed", -1) >= 0 else ""
+        self.query_one("#balance", Select).value = "on" if c.get("balance") else "off"
         self.spec = ModelSpec.from_dict(ck["meta"]["spec"])
         self.spec.name = self.model_name
         data_cfg = ck["meta"]["data_cfg"]
@@ -763,12 +779,13 @@ class TrainScreen(Screen):
                           optimizer=s("optimizer"), weight_decay=float(q("weight_decay") or 0),
                           scheduler=s("scheduler"), early_stop=int(q("early_stop") or 0),
                           device=s("device"), max_samples=int(q("max_samples") or 0),
-                          precision=s("precision"), workers=int(s("workers")))
+                          precision=s("precision"), workers=int(s("workers")),
+                          seed=int(q("seed")) if q("seed") else -1, balance=s("balance") == "on")
         if self.rl:
             cfg.gamma, cfg.explore = float(q("gamma")), float(q("explore"))
             if not (0 < cfg.gamma <= 1 and 0 < cfg.explore <= 1):
                 raise ValueError
-        if cfg.epochs < 1 or cfg.batch_size < 1 or cfg.lr <= 0:
+        if cfg.epochs < 1 or cfg.batch_size < 1 or cfg.lr <= 0 or cfg.seed < -1:
             raise ValueError
         return cfg
 
@@ -791,8 +808,8 @@ class TrainScreen(Screen):
         try:
             cfg = self._train_cfg()
         except ValueError:
-            self.notify("Check training settings: epochs/batch must be positive integers, lr > 0"
-                        + (", discount and explore between 0 and 1." if self.rl else "."), severity="error")
+            self.notify("Check training settings: epochs/batch must be positive integers, lr > 0, seed empty or "
+                        "0 and up" + (", discount and explore between 0 and 1." if self.rl else "."), severity="error")
             return
         save_as = self.model_name
         if self.finetune:
@@ -804,6 +821,17 @@ class TrainScreen(Screen):
         else:
             self.spec.frozen = []
 
+        seed = apply_seed(cfg)  # before the model is built: its starting weights are random
+        model, note = self._build_model()
+        note += f", seed {seed}"
+        checkpoint_path(self.ws, self.model_name).unlink(missing_ok=True)  # replaces an unfinished run
+        meta = {"spec": self.spec.to_dict(), "save_as": save_as if self.finetune else None,
+                "data_cfg": stored_data_cfg(self.data_cfg)}
+        self._launch(save_as, model, cfg, note, meta)
+
+    def _build_model(self):
+        """The model to train, as Start would train it: the saved weights or fresh ones, frozen layers
+        and a fresh output layer as chosen. Returns (model, note)."""
         use_saved = (self.finetune or self.query_one("#resume", Switch).value) and \
             not getattr(self, "_fresh_weights", False)
         if use_saved:
@@ -816,10 +844,79 @@ class TrainScreen(Screen):
             reset_head(self.spec, model)
             note += ", output layer re-initialised"
         self.spec.apply_freeze(model)
-        checkpoint_path(self.ws, self.model_name).unlink(missing_ok=True)  # replaces an unfinished run
-        meta = {"spec": self.spec.to_dict(), "save_as": save_as if self.finetune else None,
-                "data_cfg": stored_data_cfg(self.data_cfg)}
-        self._launch(save_as, model, cfg, note, meta)
+        return model, note
+
+    # -- learning-rate finder -----------------------------------------------------
+
+    @on(Button.Pressed, "#find-lr")
+    def _find_lr_pressed(self) -> None:
+        if self.trainer:
+            return
+        if not self.info:
+            self.notify("Load a dataset first.", severity="warning")
+            return
+        if probs := data_mismatch(self.spec, self.info):
+            self.notify(probs[0] + " - press 'Auto-fit model to data'.", severity="error", timeout=8)
+            return
+        if probs := self.spec.validate():
+            self.notify(probs[0], severity="error", timeout=8)
+            return
+        try:
+            cfg = self._train_cfg()
+        except ValueError:
+            self.notify("Check training settings first: epochs/batch must be positive integers.", severity="error")
+            return
+        self.spec.frozen = list(self.query_one("#freeze", SelectionList).selected) if self.finetune else []
+        model, _ = self._build_model()
+        call = self.app.call_from_thread
+        self.trainer = Trainer(self.spec, model, self.train_ds, self.val_ds, cfg,
+                               on_log=lambda m: call(self.query_one("#log", RichLog).write, m))
+        for wid, disabled in (("#start", True), ("#find-lr", True), ("#stop", False)):
+            self.query_one(wid, Button).disabled = disabled
+        self.query_one("#log", RichLog).write(
+            "[b]── 🔎 Finding a learning rate[/b]: a copy of the model trains for 100 batches while the "
+            "learning rate grows from 0.0000001 to 1. The model itself doesn't change.")
+        chart = self.query_one("#chart-loss", LineChart)
+        chart.title, chart.unit, chart.labels, chart.fmt = "Loss as the learning rate grows", "try", ("loss",), "{:.3f}"
+        chart.set_data([])
+        self.query_one("#progress", ProgressBar).update(total=100, progress=0)
+        self._lr_losses: list[float] = []
+        self._run_find_lr()
+
+    @work(thread=True, exclusive=True, group="train")
+    def _run_find_lr(self) -> None:
+        call = self.app.call_from_thread
+        try:
+            res = self.trainer.find_lr(on_step=lambda i, n, lr, loss: call(self._lr_step, i, n, lr, loss))
+        except Exception as e:  # noqa: BLE001 - shown on screen
+            call(self._lr_found, None, str(e))
+            return
+        call(self._lr_found, res, None)
+
+    def _lr_step(self, step: int, steps: int, lr: float, loss: float) -> None:
+        self._lr_losses.append(loss)
+        self.query_one("#chart-loss", LineChart).set_data(self._lr_losses)
+        self.query_one("#progress", ProgressBar).update(total=steps, progress=step)
+        self.query_one("#epoch-label", Static).update(f"  try {step}/{steps} · lr {lr:.1e} · loss {loss:.4f}")
+
+    def _lr_found(self, res: dict | None, error: str | None) -> None:
+        self.trainer = None
+        for wid, disabled in (("#start", False), ("#find-lr", False), ("#stop", True)):
+            self.query_one(wid, Button).disabled = disabled
+        self.query_one("#progress", ProgressBar).update(progress=self.query_one("#progress", ProgressBar).total)
+        log = self.query_one("#log", RichLog)
+        if error:
+            log.write(f"[red]The learning-rate finder failed: {error}[/]")
+            return
+        if res["suggestion"] is None:
+            log.write("[yellow]The loss never clearly fell, so there's no suggestion.[/] Check the data and the "
+                      "model (is the label column right?), or try a bigger batch size.")
+            return
+        lr = self.query_one("#lr", Input)
+        old, lr.value = lr.value, f"{res['suggestion']:g}"
+        log.write(f"[green]✓ Learning rate set to [b]{lr.value}[/b][/] (was {old}): a tenth of "
+                  f"{res['lowest']:.1e}, where the loss was lowest. The chart shows the loss falling as the "
+                  "rate grows, then shooting up once it is too big. Press ▶ Start to train with it.")
 
     def _launch(self, save_as: str, model, cfg: TrainConfig, note: str, meta: dict,
                 resume: dict | None = None) -> None:
@@ -838,6 +935,7 @@ class TrainScreen(Screen):
         self.query_one("#chart-loss", LineChart).title = {
             "clustering": "Spread within groups", "pca": "Rebuild error",
             "autoencoder": "Rebuild error"}.get(self.spec.task, "Loss")
+        self.query_one("#chart-loss", LineChart).labels = ("train", "val")  # the LR finder draws one line
         for c in (chart, self.query_one("#chart-loss", LineChart)):
             c.unit = "round" if self.classic else "episode" if self.rl else "epoch"
         if self.rl:
@@ -852,6 +950,7 @@ class TrainScreen(Screen):
         self.query_one("#chart-loss", LineChart).set_data([], [])
         chart.set_data([], [])
         self.query_one("#start", Button).disabled = True
+        self.query_one("#find-lr", Button).disabled = True
         self.query_one("#stop", Button).disabled = False
         self.query_one("#progress", ProgressBar).update(total=cfg.epochs,
                                                         progress=resume["epoch"] if resume else 0)
@@ -964,6 +1063,7 @@ class TrainScreen(Screen):
         self.query_one("#resume-run", Button).display = self._unfinished() is not None
         self.query_one("#sysmon", SystemPanel).training_stopped()
         self.query_one("#start", Button).disabled = False
+        self.query_one("#find-lr", Button).disabled = False
         self.query_one("#stop", Button).disabled = True
         log = self.query_one("#log", RichLog)
         if error:
@@ -1128,9 +1228,9 @@ class TrainScreen(Screen):
 
     def _raw_settings(self) -> dict:
         vals = {i: self.query_one(f"#{i}", Input).value for i in
-                ("epochs", "batch_size", "lr", "weight_decay", "early_stop", "val_split", "gamma", "explore")}
+                ("epochs", "batch_size", "lr", "weight_decay", "early_stop", "val_split", "gamma", "explore", "seed")}
         vals.update({i: str(self.query_one(f"#{i}", Select).value)
-                     for i in ("optimizer", "scheduler", "device", "precision", "workers")})
+                     for i in ("optimizer", "scheduler", "device", "precision", "workers", "balance")})
         return vals
 
     def _frozen_params(self) -> int:

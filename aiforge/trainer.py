@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import copy
 import math
+import random
 import threading
 import time
 from dataclasses import asdict, dataclass
@@ -12,6 +13,8 @@ from typing import Callable
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
+
+import numpy as np
 
 from .data import DataInfo, loader_workers
 from .spec import CLASSIC_TASKS, ModelSpec, is_unsupervised
@@ -30,6 +33,8 @@ class TrainConfig:
     max_samples: int = 0  # 0 = use everything
     precision: str = "auto"  # auto | fp32 | bf16 | fp16 (see amp_dtype)
     workers: int = -1  # background data-loading processes, -1 = auto (see data.loader_workers)
+    seed: int = -1  # starting weights, shuffles and dropout; -1 = a new one each run (see apply_seed)
+    balance: bool = False  # classification: rare classes count more in the loss (see class_weights)
     # Reinforcement learning only (epochs = episodes there, see rl.train_agent):
     gamma: float = 0.99  # discount: how much rewards later on count compared with one now
     explore: float = 0.5  # share of the episodes over which random exploration fades out
@@ -59,6 +64,32 @@ def amp_dtype(dev: torch.device, precision: str = "auto") -> torch.dtype | None:
             return torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
         return None
     return {"bf16": torch.bfloat16, "fp16": torch.float16}.get(precision)
+
+
+def apply_seed(cfg: TrainConfig) -> int:
+    """Seed every random number generator a run uses, before the model is built: the same seed,
+    data and settings give the same starting weights, shuffles and dropout, so the same result
+    (on a GPU tiny differences can remain). A seed of -1 picks a new one; either way it is stored
+    in ``cfg`` and so in the run's history, so any run can be repeated."""
+    if cfg.seed < 0:
+        cfg.seed = random.SystemRandom().randrange(1, 100_000)
+    random.seed(cfg.seed)
+    np.random.seed(cfg.seed)
+    torch.manual_seed(cfg.seed)  # also seeds CUDA and Apple GPUs
+    return cfg.seed
+
+
+def class_weights(ds, n_classes: int) -> torch.Tensor:
+    """A weight per class for the loss, so every class counts as much in total however many
+    examples it has: total / (classes × examples of it). Classes without examples get 0."""
+    from .evaluate import _labels
+
+    y = _labels(ds)
+    if y is None:  # an unusual dataset: read the labels one by one
+        y = np.array([int(item[1]) for item in ds])
+    counts = np.bincount(np.asarray(y, dtype=np.int64), minlength=n_classes)[:n_classes].astype(float)
+    w = np.divide(counts.sum(), n_classes * counts, out=np.zeros_like(counts), where=counts > 0)
+    return torch.tensor(w, dtype=torch.float32)
 
 
 def available_devices() -> list[str]:
@@ -203,8 +234,26 @@ class Trainer:
     def stopped(self) -> bool:
         return self._stop.is_set()
 
-    def _loss_fn(self):
-        return nn.MSELoss() if self.spec.task in ("regression", "autoencoder") else nn.CrossEntropyLoss()
+    def _loss_fn(self, dev: torch.device | None = None):
+        if self.spec.task in ("regression", "autoencoder"):
+            return nn.MSELoss()
+        if self.cfg.balance and self.spec.task == "classification":
+            n = len(self.spec.class_names) or (self.spec.output_shape() or [0])[-1]
+            w = class_weights(self.train_ds, n)
+            used = w[w > 0]
+            ratio = float(used.max() / used.min()) if len(used) > 1 else 1.0
+            self.on_log(f"Balancing classes: an example of the rarest class counts {ratio:.1f}× as much as one "
+                        "of the most common." if ratio >= 1.1 else
+                        "Balancing classes: they are already about equally common, so nothing changes.")
+            return nn.CrossEntropyLoss(weight=w.to(dev) if dev is not None else w)
+        return nn.CrossEntropyLoss()
+
+    def _batch_loss(self, out, x, y, loss_fn):
+        if self.spec.task == "language_model":
+            return lm_loss(out, y, loss_fn)
+        if self.spec.task == "autoencoder":  # learns to rebuild its input: the input is the answer
+            return loss_fn(out, x)
+        return loss_fn(out, y.float() if self.spec.task == "regression" else y)
 
     def _optimizer(self):
         params = [p for p in self.model.parameters() if p.requires_grad]
@@ -323,7 +372,7 @@ class Trainer:
         train_dl = DataLoader(self.train_ds, shuffle=True, drop_last=len(self.train_ds) > c.batch_size,
                               **loader_kw)
         val_dl = DataLoader(self.val_ds, shuffle=False, **loader_kw) if len(self.val_ds) else None
-        loss_fn, opt = self._loss_fn(), self._optimizer()
+        loss_fn, opt = self._loss_fn(dev), self._optimizer()
         amp = amp_dtype(dev, c.precision)
         # float16 can round tiny gradients to 0; the scaler multiplies the loss up first (bfloat16 needn't).
         scaler = torch.amp.GradScaler(dev.type, enabled=amp == torch.float16)
@@ -359,7 +408,6 @@ class Trainer:
         t_start, complete = time.time(), False
         steps = len(train_dl)
         lm = self.spec.task == "language_model"
-        ae = self.spec.task == "autoencoder"  # learns to rebuild its input: the input is the answer
         for epoch in range(first, c.epochs + 1):
             self._set_train_mode()
             run_loss, run_correct, seen, done = 0.0, 0, 0, 0
@@ -371,12 +419,7 @@ class Trainer:
                 x, y = x.to(dev, non_blocking=True), y.to(dev, non_blocking=True)
                 with torch.autocast(dev.type, dtype=amp, enabled=amp is not None):
                     out = self.model(x)
-                    if lm:
-                        loss = lm_loss(out, y, loss_fn)
-                    elif ae:
-                        loss = loss_fn(out, x)
-                    else:
-                        loss = loss_fn(out, y.float() if self.spec.task == "regression" else y)
+                    loss = self._batch_loss(out, x, y, loss_fn)
                 opt.zero_grad(set_to_none=True)
                 scaler.scale(loss).backward()
                 if lm:  # deep Transformers trained from scratch can take the odd huge step
@@ -458,6 +501,76 @@ class Trainer:
         if resumed_at is not None:
             run["resumed_at"] = resumed_at
         return run
+
+    def find_lr(self, steps: int = 100, start: float = 1e-7, end: float = 1.0,
+                on_step: Callable[[int, int, float, float], None] | None = None) -> dict:
+        """Learning-rate range test: train a copy of the model for ``steps`` batches while the
+        learning rate grows from ``start`` to ``end``, and watch the loss. It falls once the rate
+        is big enough to learn, then shoots up when it is too big. The suggestion is a tenth of the
+        rate where the loss was lowest: still on the falling part, safely below where it blows up.
+
+        The model itself is left untouched. Returns {"lrs", "losses" (smoothed), "suggestion"
+        (None when the loss never fell), "lowest"}; ``on_step(step, steps, lr, loss)`` reports progress."""
+        if self.spec.task in CLASSIC_TASKS or self.spec.task == "reinforcement":
+            raise ValueError("The learning-rate finder is for neural networks trained on data.")
+        c = self.cfg
+        torch.manual_seed(c.seed if c.seed >= 0 else 0)  # the same suggestion every time
+        dev = pick_device(c.device)
+        original, self.model = self.model, copy.deepcopy(self.model).to(dev)
+        try:
+            loader = DataLoader(self.train_ds, batch_size=c.batch_size, shuffle=True,
+                                drop_last=len(self.train_ds) > c.batch_size)
+            if not len(loader):
+                raise ValueError("No training examples to try learning rates on.")
+            loss_fn, opt = self._loss_fn(dev), self._optimizer()
+            amp = amp_dtype(dev, c.precision)
+            scaler = torch.amp.GradScaler(dev.type, enabled=amp == torch.float16)
+            factor = (end / start) ** (1 / max(1, steps - 1))
+            lr, avg, lowest = start, 0.0, math.inf
+            lrs, losses = [], []
+            self._set_train_mode()
+            batches = iter(loader)
+            for step in range(1, steps + 1):
+                if self.stopped:
+                    break
+                try:
+                    x, y = next(batches)
+                except StopIteration:  # a small dataset: go round again
+                    batches = iter(loader)
+                    x, y = next(batches)
+                for group in opt.param_groups:
+                    group["lr"] = lr
+                x, y = x.to(dev), y.to(dev)
+                with torch.autocast(dev.type, dtype=amp, enabled=amp is not None):
+                    loss = self._batch_loss(self.model(x), x, y, loss_fn)
+                opt.zero_grad(set_to_none=True)
+                scaler.scale(loss).backward()
+                if self.spec.task == "language_model":
+                    scaler.unscale_(opt)
+                    nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+                scaler.step(opt)
+                scaler.update()
+                value = loss.item()
+                if not math.isfinite(value):
+                    break
+                avg = 0.9 * avg + 0.1 * value  # smoothed: single batches are noisy
+                smooth = avg / (1 - 0.9 ** step)
+                lrs.append(lr)
+                losses.append(smooth)
+                lowest = min(lowest, smooth)
+                if on_step:
+                    on_step(step, steps, lr, smooth)
+                if step > 10 and smooth > 4 * lowest:  # blown up: bigger rates only get worse
+                    break
+                lr *= factor
+        finally:
+            self.model = original
+        best = min(range(len(losses)), key=losses.__getitem__) if losses else 0
+        # The loss must really have fallen, and not only in the first few noisy steps.
+        fell = len(losses) >= 10 and best >= 5 and losses[best] < 0.95 * losses[0]
+        suggestion = float(f"{lrs[best] / 10:.1g}") if fell else None
+        return {"lrs": lrs, "losses": losses, "suggestion": suggestion,
+                "lowest": lrs[best] if losses else None}
 
 
 def perplexity(loss: float) -> float:

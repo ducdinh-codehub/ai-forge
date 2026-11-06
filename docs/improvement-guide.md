@@ -21,9 +21,11 @@ A prioritised plan for making AIForge sturdier and more useful. Tick items off a
   "Resume" when a run was interrupted.
 - [x] **Speed.** "Auto" mixed precision (`torch.autocast`) on CUDA/MPS; `num_workers > 0` for image
   folders (currently hard-coded to 0 in `trainer.py`).
-- [ ] **Learning-rate finder.** One button that sweeps the LR for a few hundred steps and suggests a value.
+- [x] **Learning-rate finder.** One button that sweeps the LR for a few hundred steps and suggests a value.
 - [ ] **Mini sweep.** Try a few learning rates / batch sizes, compare side by side, keep the best.
-- [ ] **Reproducibility.** A seed field, recorded with each run in the history.
+- [x] **Balanced classes.** Weight rare classes up in the loss; the goal wizard turns it on for
+  unbalanced data (Evaluate already warned about it).
+- [x] **Reproducibility.** A seed field, recorded with each run in the history.
 
 ## 3. Product
 
