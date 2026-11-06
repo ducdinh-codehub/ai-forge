@@ -152,7 +152,10 @@ def test_the_wizard_creates_a_model_and_opens_it_ready_to_train(tmp_path):
             await pilot.press("n")
             await pilot.pause()
             await pilot.click("#wizard")
-            await pilot.pause()
+            for _ in range(100):  # dismiss → callback → push takes a few ticks on slow runners
+                await pilot.pause(0.05)
+                if isinstance(app.screen, GoalDialog):
+                    break
             dialog = app.screen
             assert isinstance(dialog, GoalDialog)
             dialog.query_one("#goal").value = "predict house prices"
